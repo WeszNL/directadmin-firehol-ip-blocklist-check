@@ -4,9 +4,10 @@ declare(strict_types=1);
 
 final class SernateFireholBlocklistCheck
 {
-    public const VERSION = '0.1.0';
+    public const VERSION = '0.1.1';
     public const PLUGIN_ID = 'sernate_firehol_blocklist_check';
     public const DEFAULT_API_BASE_URL = 'https://blocklist.sernate.com';
+    public const TEST_IP = '223.244.22.213';
     public const UPDATE_URL = 'https://blocklist.sernate.com/sernate_firehol_blocklist_check.tar.gz';
     public const VERSION_URL = 'https://blocklist.sernate.com/version.txt';
     public const CONFIG_FILE = __DIR__ . '/../data/config.json';
@@ -21,6 +22,9 @@ final class SernateFireholBlocklistCheck
             'schedule_enabled' => false,
             'schedule_interval_hours' => 6,
             'notify_on_new_listings' => true,
+            'notification_method' => 'directadmin',
+            'notification_email' => '',
+            'notification_from' => '',
             'current_only' => true,
             'include_stale' => false,
             'investigation_mode' => false,
@@ -69,6 +73,9 @@ final class SernateFireholBlocklistCheck
         $config['current_only'] = (bool) $config['current_only'];
         $config['include_stale'] = (bool) $config['include_stale'];
         $config['investigation_mode'] = (bool) $config['investigation_mode'];
+        if (!in_array($config['notification_method'], ['directadmin', 'email', 'both'], true)) {
+            $config['notification_method'] = 'directadmin';
+        }
 
         if ($config['investigation_mode']) {
             $config['current_only'] = false;
@@ -90,6 +97,15 @@ final class SernateFireholBlocklistCheck
         $config['schedule_enabled'] = !empty($input['schedule_enabled']);
         $config['schedule_interval_hours'] = self::normalizeInterval((int) ($input['schedule_interval_hours'] ?? 6));
         $config['notify_on_new_listings'] = !empty($input['notify_on_new_listings']);
+        $config['notification_method'] = in_array(($input['notification_method'] ?? ''), ['directadmin', 'email', 'both'], true)
+            ? (string) $input['notification_method']
+            : 'directadmin';
+        $config['notification_email'] = filter_var((string) ($input['notification_email'] ?? ''), FILTER_VALIDATE_EMAIL)
+            ? (string) $input['notification_email']
+            : '';
+        $config['notification_from'] = filter_var((string) ($input['notification_from'] ?? ''), FILTER_VALIDATE_EMAIL)
+            ? (string) $input['notification_from']
+            : '';
         $config['investigation_mode'] = !empty($input['investigation_mode']);
         $config['current_only'] = !$config['investigation_mode'];
         $config['include_stale'] = $config['investigation_mode'];
@@ -220,7 +236,7 @@ final class SernateFireholBlocklistCheck
         $result = [
             'ok' => true,
             'status' => $status,
-            'message' => self::statusLabel($status),
+            'message' => self::resultMessage($status, count($ips)),
             'checked_at' => gmdate('c'),
             'ips' => $ips,
             'api' => $json,
@@ -301,7 +317,7 @@ final class SernateFireholBlocklistCheck
         $result = self::runCheck(null, $config);
 
         if (!empty($config['notify_on_new_listings']) && self::hasNewActiveListing($previous, $result)) {
-            self::notifyAdmin($result);
+            self::notify($result, $config);
         }
 
         flock($lock, LOCK_UN);
@@ -338,6 +354,19 @@ final class SernateFireholBlocklistCheck
         return array_values(array_unique($ips));
     }
 
+    public static function notify(array $result, array $config): void
+    {
+        $method = (string) ($config['notification_method'] ?? 'directadmin');
+
+        if ($method === 'directadmin' || $method === 'both') {
+            self::notifyAdmin($result);
+        }
+
+        if (($method === 'email' || $method === 'both') && !empty($config['notification_email'])) {
+            self::notifyEmail($result, (string) $config['notification_email'], (string) ($config['notification_from'] ?? ''));
+        }
+    }
+
     public static function notifyAdmin(array $result): void
     {
         $ips = implode(', ', self::activeListedIps($result));
@@ -346,6 +375,53 @@ final class SernateFireholBlocklistCheck
         $line = "action=notify&value=admin&subject={$subject}&message={$message}\n";
         // This plugin reports listings only; it never changes firewall rules.
         @file_put_contents('/usr/local/directadmin/data/task.queue', $line, FILE_APPEND | LOCK_EX);
+    }
+
+    public static function notifyEmail(array $result, string $to, string $from = ''): void
+    {
+        if (!function_exists('mail') || !filter_var($to, FILTER_VALIDATE_EMAIL)) {
+            return;
+        }
+
+        $ips = implode(', ', self::activeListedIps($result));
+        $subject = 'Sernate FireHOL Blocklist Check: IP listed';
+        $message = "One or more public server IPs appear in indexed FireHOL blocklists.\n\nIPs: {$ips}\n\nOpen DirectAdmin > Sernate FireHOL Blocklist Check for details.";
+        $headers = [];
+        if ($from !== '' && filter_var($from, FILTER_VALIDATE_EMAIL)) {
+            $headers[] = 'From: ' . $from;
+            $headers[] = 'Reply-To: ' . $from;
+        }
+
+        @mail($to, $subject, $message, implode("\r\n", $headers));
+    }
+
+    public static function resultRows(?array $result): array
+    {
+        if (!$result) {
+            return [];
+        }
+
+        $rows = [];
+        foreach (($result['api']['results'] ?? []) as $row) {
+            if (!empty($row['ip'])) {
+                $rows[(string) $row['ip']] = $row;
+            }
+        }
+
+        foreach (($result['ips'] ?? []) as $ip) {
+            $ip = (string) $ip;
+            if (!isset($rows[$ip])) {
+                $rows[$ip] = [
+                    'ip' => $ip,
+                    'currently_blacklisted' => false,
+                    'hits' => [],
+                    'hits_count' => 0,
+                ];
+            }
+        }
+
+        ksort($rows);
+        return array_values($rows);
     }
 
     public static function updateStatus(): array
@@ -426,6 +502,19 @@ final class SernateFireholBlocklistCheck
             'api_unavailable' => 'API Unavailable',
             'no_public_ips' => 'No Public IPv4 Detected',
         ][$status] ?? ucfirst(str_replace('_', ' ', $status));
+    }
+
+    public static function resultMessage(string $status, int $checkedCount): string
+    {
+        if ($status === 'clean') {
+            return 'Clean: none of the ' . $checkedCount . ' checked IP address(es) were found in current fresh FireHOL blocklists.';
+        }
+
+        if ($status === 'listed') {
+            return 'Listed: one or more checked IP address(es) appear in indexed FireHOL blocklists.';
+        }
+
+        return self::statusLabel($status);
     }
 
     public static function httpPost(string $url, string $body): array

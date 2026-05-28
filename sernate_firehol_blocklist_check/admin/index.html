@@ -9,18 +9,24 @@ SernateFireholBlocklistCheck::loadDirectAdminRequest();
 
 $notice = null;
 $error = null;
-$action = (string) ($_POST['action'] ?? $_GET['action'] ?? '');
+$requestData = array_merge($_GET, $_POST);
+$action = (string) ($requestData['action'] ?? '');
 
 if ($action !== '') {
     try {
         SernateFireholBlocklistCheck::recordDebug('page_action', ['requested_action' => $action]);
 
         if ($action === 'save') {
-            SernateFireholBlocklistCheck::saveConfig($_POST);
+            SernateFireholBlocklistCheck::saveConfig($requestData);
             $notice = 'Settings saved.';
         } elseif ($action === 'check') {
             $result = SernateFireholBlocklistCheck::runCheck();
-            $notice = 'Check completed: ' . SernateFireholBlocklistCheck::statusLabel((string) $result['status']) . '.';
+            $notice = (string) $result['message'];
+        } elseif ($action === 'check_test') {
+            $ips = SernateFireholBlocklistCheck::publicIpv4Addresses();
+            $ips[] = SernateFireholBlocklistCheck::TEST_IP;
+            $result = SernateFireholBlocklistCheck::runCheck(array_values(array_unique($ips)));
+            $notice = 'Test IP included: ' . (string) $result['message'];
         } elseif ($action === 'debug') {
             SernateFireholBlocklistCheck::recordDebug('manual_debug', [
                 'ip_detection' => SernateFireholBlocklistCheck::ipDetectionDebug(),
@@ -42,26 +48,27 @@ $detectedIps = SernateFireholBlocklistCheck::publicIpv4Addresses();
 $update = SernateFireholBlocklistCheck::updateStatus();
 $debug = SernateFireholBlocklistCheck::loadDebug();
 $headerStatus = $last ? (string) $last['status'] : 'not_checked';
+$resultRows = SernateFireholBlocklistCheck::resultRows($last);
 
 function checkedAttr(bool $value): string
 {
     return $value ? ' checked' : '';
 }
 
-function selectedAttr(int $actual, int $expected): string
+function selectedAttr($actual, $expected): string
 {
-    return $actual === $expected ? ' selected' : '';
+    return (string) $actual === (string) $expected ? ' selected' : '';
 }
 
 ?>
 <style>
-    .sir-wrap { color: inherit; }
+    .sir-wrap { color: #1f2937; font-family: Roboto, "Open Sans", Arial, Helvetica, sans-serif; font-size: 14px; }
     .sir-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin: 0 0 14px; }
     .sir-title { margin: 0; font-size: 20px; line-height: 1.25; font-weight: 700; }
     .sir-subtitle { margin: 6px 0 0; color: #667085; max-width: 820px; line-height: 1.45; }
     .sir-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr); gap: 14px; }
     .sir-card { border: 1px solid #d7dde8; border-radius: 4px; padding: 14px; background: transparent; }
-    .sir-card h2 { margin: 0 0 12px; font-size: 15px; font-weight: 700; }
+    .sir-card h2 { margin: 0 0 12px; font-size: 15px; font-weight: 700; color: #111827; }
     .sir-status { display: inline-flex; align-items: center; min-height: 32px; padding: 0 12px; border-radius: 999px; font-weight: 700; }
     .sir-status.clean { background: #dcfce7; color: #166534; }
     .sir-status.listed { background: #fee2e2; color: #991b1b; }
@@ -70,6 +77,9 @@ function selectedAttr(int $actual, int $expected): string
     .sir-alert { padding: 12px 14px; border-radius: 8px; margin: 0 0 14px; }
     .sir-alert.ok { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
     .sir-alert.err { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+    .sir-result-clean { background: #ecfdf5; border: 1px solid #86efac; color: #14532d; }
+    .sir-result-listed { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+    .sir-result-neutral { background: #f8fafc; border: 1px solid #d7dde8; color: #334155; }
     .sir-form-row { margin-bottom: 14px; }
     .sir-label { display: block; font-weight: 650; margin-bottom: 6px; }
     .sir-input, .sir-select { width: 100%; max-width: 520px; padding: 7px 9px; border: 1px solid #b9c3d3; border-radius: 4px; background: #fff; }
@@ -85,6 +95,10 @@ function selectedAttr(int $actual, int $expected): string
     .sir-update { display: grid; gap: 6px; }
     .sir-update strong { color: #172033; }
     .sir-debug pre { white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow: auto; margin: 8px 0 0; padding: 10px; border: 1px solid #d7dde8; border-radius: 4px; background: rgba(0, 0, 0, .03); }
+    .sir-pill { display: inline-block; padding: 3px 8px; border-radius: 999px; font-weight: 700; font-size: 12px; }
+    .sir-pill.clean { background: #dcfce7; color: #166534; }
+    .sir-pill.listed { background: #fee2e2; color: #991b1b; }
+    .sir-help { color: #667085; margin-top: 5px; }
     @media (max-width: 860px) { .sir-grid, .sir-head { display: block; } .sir-card { margin-bottom: 16px; } }
 </style>
 
@@ -101,7 +115,7 @@ function selectedAttr(int $actual, int $expected): string
         </div>
     </div>
 
-    <?php if ($notice): ?><div class="sir-alert ok"><?= SernateFireholBlocklistCheck::html($notice) ?></div><?php endif; ?>
+    <?php if ($notice): ?><div class="sir-alert ok"><strong><?= SernateFireholBlocklistCheck::html($notice) ?></strong></div><?php endif; ?>
     <?php if ($error): ?><div class="sir-alert err"><?= SernateFireholBlocklistCheck::html($error) ?></div><?php endif; ?>
 
     <div class="sir-grid">
@@ -109,14 +123,30 @@ function selectedAttr(int $actual, int $expected): string
             <h2>Current Result</h2>
             <?php if ($last): ?>
                 <p class="sir-muted">Last checked: <?= SernateFireholBlocklistCheck::html((string) $last['checked_at']) ?></p>
+                <?php if (($last['status'] ?? '') === 'clean'): ?>
+                    <div class="sir-alert sir-result-clean"><strong>Clean:</strong> none of the checked IP addresses were found in current fresh FireHOL blocklists.</div>
+                <?php elseif (($last['status'] ?? '') === 'listed'): ?>
+                    <div class="sir-alert sir-result-listed"><strong>Listed:</strong> one or more checked IP addresses appear in indexed FireHOL blocklists.</div>
+                <?php else: ?>
+                    <div class="sir-alert sir-result-neutral"><?= SernateFireholBlocklistCheck::html((string) ($last['message'] ?? 'Result available.')) ?></div>
+                <?php endif; ?>
                 <table class="sir-table">
                     <thead><tr><th>IP</th><th>Status</th><th>Feeds</th></tr></thead>
                     <tbody>
-                    <?php foreach (($last['api']['results'] ?? []) as $row): ?>
+                    <?php foreach ($resultRows as $row): ?>
                         <tr>
                             <td><?= SernateFireholBlocklistCheck::html((string) ($row['ip'] ?? '')) ?></td>
-                            <td><?= !empty($row['currently_blacklisted']) ? 'Listed' : 'Clean or history only' ?></td>
                             <td>
+                                <?php if (!empty($row['currently_blacklisted'])): ?>
+                                    <span class="sir-pill listed">Listed</span>
+                                <?php else: ?>
+                                    <span class="sir-pill clean">Not found</span>
+                                <?php endif; ?>
+                            </td>
+                            <td>
+                                <?php if (empty($row['hits'])): ?>
+                                    <span class="sir-muted">No current listing in checked FireHOL feeds.</span>
+                                <?php endif; ?>
                                 <?php foreach (($row['hits'] ?? []) as $hit): ?>
                                     <div class="sir-small">
                                         <strong><?= SernateFireholBlocklistCheck::html((string) ($hit['feed_name'] ?? 'Unknown feed')) ?></strong>
@@ -137,7 +167,9 @@ function selectedAttr(int $actual, int $expected): string
             <form method="get" class="sir-actions">
                 <input type="hidden" name="action" value="check">
                 <button class="sir-btn" type="submit">Run Check Now</button>
+                <button class="sir-btn secondary" name="action" value="check_test" type="submit">Run With Test IP</button>
             </form>
+            <p class="sir-small sir-help">Test mode adds <?= SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::TEST_IP) ?> to the detected server IPs so you can preview a listed result.</p>
         </section>
 
         <section class="sir-card">
@@ -158,6 +190,23 @@ function selectedAttr(int $actual, int $expected): string
                     </select>
                 </div>
                 <label class="sir-check"><input type="checkbox" name="notify_on_new_listings" value="1"<?= checkedAttr((bool) $config['notify_on_new_listings']) ?>> Notify DirectAdmin admin when new active listings are found</label>
+                <div class="sir-form-row">
+                    <label class="sir-label" for="notification_method">Notification method</label>
+                    <select class="sir-select" id="notification_method" name="notification_method">
+                        <option value="directadmin"<?= selectedAttr((string) $config['notification_method'], 'directadmin') ?>>DirectAdmin system message</option>
+                        <option value="email"<?= selectedAttr((string) $config['notification_method'], 'email') ?>>Custom email only</option>
+                        <option value="both"<?= selectedAttr((string) $config['notification_method'], 'both') ?>>DirectAdmin message and custom email</option>
+                    </select>
+                </div>
+                <div class="sir-form-row">
+                    <label class="sir-label" for="notification_email">Custom email address</label>
+                    <input class="sir-input" id="notification_email" name="notification_email" value="<?= SernateFireholBlocklistCheck::html((string) $config['notification_email']) ?>">
+                </div>
+                <div class="sir-form-row">
+                    <label class="sir-label" for="notification_from">From address for custom email</label>
+                    <input class="sir-input" id="notification_from" name="notification_from" value="<?= SernateFireholBlocklistCheck::html((string) $config['notification_from']) ?>">
+                    <div class="sir-small sir-help">Leave empty to use the server mail default. A custom From header is only used when it is a valid email address.</div>
+                </div>
                 <label class="sir-check"><input type="checkbox" name="investigation_mode" value="1"<?= checkedAttr((bool) $config['investigation_mode']) ?>> Investigation mode: include historical removed listings and stale sources</label>
                 <div class="sir-actions">
                     <button class="sir-btn secondary" type="submit">Save Settings</button>
