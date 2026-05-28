@@ -73,7 +73,8 @@ function selectedAttr($actual, $expected): string
     .sir-status.clean { background: #dcfce7; color: #166534; }
     .sir-status.listed { background: #fee2e2; color: #991b1b; }
     .sir-status.history_only, .sir-status.stale_source { background: #fef3c7; color: #92400e; }
-    .sir-status.api_unavailable, .sir-status.no_public_ips, .sir-status.not_checked { background: #e5e7eb; color: #374151; }
+    .sir-status.api_error, .sir-status.api_unavailable, .sir-status.no_public_ips, .sir-status.not_checked { background: #e5e7eb; color: #374151; }
+    .sir-status.rate_limited { background: #fef3c7; color: #92400e; }
     .sir-alert { padding: 12px 14px; border-radius: 8px; margin: 0 0 14px; }
     .sir-alert.ok { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
     .sir-alert.err { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
@@ -130,6 +131,8 @@ function selectedAttr($actual, $expected): string
                     <div class="sir-alert sir-result-clean"><strong>Clean:</strong> none of the checked IP addresses were found in current fresh FireHOL blocklists.</div>
                 <?php elseif (($last['status'] ?? '') === 'listed'): ?>
                     <div class="sir-alert sir-result-listed"><strong>Listed:</strong> one or more checked IP addresses appear in indexed FireHOL blocklists.</div>
+                <?php elseif (($last['status'] ?? '') === 'rate_limited'): ?>
+                    <div class="sir-alert sir-result-neutral"><strong>Rate limited:</strong> the API returned HTTP 429. Please wait and try again later.</div>
                 <?php else: ?>
                     <div class="sir-alert sir-result-neutral"><?= SernateFireholBlocklistCheck::html((string) ($last['message'] ?? 'Result available.')) ?></div>
                 <?php endif; ?>
@@ -156,8 +159,10 @@ function selectedAttr($actual, $expected): string
                                         <?php if (!empty($hit['current_status'])): ?> · <?= SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::hitStatusLabel($hit)) ?><?php endif; ?>
                                         <?php if (!empty($hit['source_is_stale'])): ?> · stale source<?php endif; ?>
                                         <?php if (!empty($hit['maintainer'])): ?><br><span class="sir-muted"><?= SernateFireholBlocklistCheck::html((string) $hit['maintainer']) ?></span><?php endif; ?>
-                                        <?php if (!empty($hit['maintainer_url'])): ?><br><a href="<?= SernateFireholBlocklistCheck::html((string) $hit['maintainer_url']) ?>" target="_blank" rel="noopener noreferrer"><?= SernateFireholBlocklistCheck::html((string) $hit['maintainer_url']) ?></a><?php endif; ?>
-                                        <?php if (!empty($hit['list_source_url'])): ?><br><span class="sir-muted">Source:</span> <a href="<?= SernateFireholBlocklistCheck::html((string) $hit['list_source_url']) ?>" target="_blank" rel="noopener noreferrer"><?= SernateFireholBlocklistCheck::html((string) $hit['list_source_url']) ?></a><?php endif; ?>
+                                        <?php $maintainerUrl = SernateFireholBlocklistCheck::safeUrl((string) ($hit['maintainer_url'] ?? '')); ?>
+                                        <?php $sourceUrl = SernateFireholBlocklistCheck::safeUrl((string) ($hit['list_source_url'] ?? '')); ?>
+                                        <?php if ($maintainerUrl !== ''): ?><br><a href="<?= SernateFireholBlocklistCheck::html($maintainerUrl) ?>" target="_blank" rel="noopener noreferrer"><?= SernateFireholBlocklistCheck::html($maintainerUrl) ?></a><?php endif; ?>
+                                        <?php if ($sourceUrl !== ''): ?><br><span class="sir-muted">Source:</span> <a href="<?= SernateFireholBlocklistCheck::html($sourceUrl) ?>" target="_blank" rel="noopener noreferrer"><?= SernateFireholBlocklistCheck::html($sourceUrl) ?></a><?php endif; ?>
                                     </div>
                                 <?php endforeach; ?>
                             </td>

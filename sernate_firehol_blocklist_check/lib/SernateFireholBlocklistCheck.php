@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 final class SernateFireholBlocklistCheck
 {
-    public const VERSION = '0.1.2';
+    public const VERSION = '0.1.3';
     public const PLUGIN_ID = 'sernate_firehol_blocklist_check';
     public const DEFAULT_API_BASE_URL = 'https://blocklist.sernate.com';
     public const TEST_IP = '223.244.22.213';
@@ -201,13 +201,14 @@ final class SernateFireholBlocklistCheck
 
         $response = self::httpPost($url, $body);
         if (!$response['ok']) {
+            $status = self::statusFromHttpResponse($response);
             return self::recordResult([
                 'ok' => false,
-                'status' => 'api_unavailable',
-                'message' => $response['error'] ?: 'The Sernate Blocklist API is unavailable.',
+                'status' => $status,
+                'message' => self::apiErrorMessage($response),
                 'checked_at' => gmdate('c'),
                 'ips' => $ips,
-                'api' => $response,
+                'api' => self::safeHttpResponse($response),
                 'debug' => self::runtimeDebug($config, $ips, $response),
             ]);
         }
@@ -220,7 +221,7 @@ final class SernateFireholBlocklistCheck
                 'message' => 'The API returned an invalid response.',
                 'checked_at' => gmdate('c'),
                 'ips' => $ips,
-                'api' => $response,
+                'api' => self::safeHttpResponse($response),
                 'debug' => self::runtimeDebug($config, $ips, $response),
             ]);
         }
@@ -381,6 +382,7 @@ final class SernateFireholBlocklistCheck
         $message = "One or more public server IPs appear in indexed FireHOL blocklists.\n\nIPs: {$ips}\n\nOpen DirectAdmin > Sernate FireHOL Blocklist Check for details.";
         $headers = [];
         if ($from !== '' && filter_var($from, FILTER_VALIDATE_EMAIL)) {
+            $from = self::cleanHeaderValue($from);
             $headers[] = 'From: ' . $from;
             $headers[] = 'Reply-To: ' . $from;
         }
@@ -505,6 +507,8 @@ final class SernateFireholBlocklistCheck
             'listed' => 'Listed',
             'history_only' => 'History Only',
             'stale_source' => 'Stale Source',
+            'rate_limited' => 'Rate Limited',
+            'api_error' => 'API Error',
             'api_unavailable' => 'API Unavailable',
             'no_public_ips' => 'No Public IPv4 Detected',
         ][$status] ?? ucfirst(str_replace('_', ' ', $status));
@@ -521,6 +525,68 @@ final class SernateFireholBlocklistCheck
         }
 
         return self::statusLabel($status);
+    }
+
+    public static function statusFromHttpResponse(array $response): string
+    {
+        $statusCode = (int) ($response['status_code'] ?? 0);
+        if ($statusCode === 429) {
+            return 'rate_limited';
+        }
+
+        if ($statusCode === 503 || $statusCode === 0) {
+            return 'api_unavailable';
+        }
+
+        return 'api_error';
+    }
+
+    public static function apiErrorMessage(array $response): string
+    {
+        $statusCode = (int) ($response['status_code'] ?? 0);
+        if ($statusCode === 429) {
+            return 'Rate limited: the Sernate Blocklist API received too many requests. Please wait and try again later.';
+        }
+
+        if ($statusCode === 503) {
+            return 'API unavailable: the Sernate Blocklist API is temporarily unavailable. Please try again later.';
+        }
+
+        if ($statusCode === 0) {
+            return 'API unavailable: could not connect to the Sernate Blocklist API.';
+        }
+
+        return 'API error: the Sernate Blocklist API returned HTTP ' . $statusCode . '.';
+    }
+
+    public static function safeHttpResponse(array $response): array
+    {
+        return [
+            'ok' => (bool) ($response['ok'] ?? false),
+            'status_code' => (int) ($response['status_code'] ?? 0),
+            'error' => self::cleanHeaderValue((string) ($response['error'] ?? '')),
+        ];
+    }
+
+    public static function safeUrl(?string $url): string
+    {
+        $url = trim((string) $url);
+        if ($url === '') {
+            return '';
+        }
+
+        $parts = parse_url($url);
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+        if (!in_array($scheme, ['http', 'https'], true)) {
+            return '';
+        }
+
+        return filter_var($url, FILTER_VALIDATE_URL) ? $url : '';
+    }
+
+    public static function cleanHeaderValue(string $value): string
+    {
+        return trim(str_replace(["\r", "\n"], '', $value));
     }
 
     public static function httpPost(string $url, string $body): array
@@ -541,6 +607,8 @@ final class SernateFireholBlocklistCheck
             CURLOPT_HEADER => false,
             CURLOPT_CONNECTTIMEOUT => 8,
             CURLOPT_TIMEOUT => 30,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
             CURLOPT_HTTPHEADER => [
                 'Content-Type: text/plain',
                 'Accept: application/json',
@@ -577,6 +645,8 @@ final class SernateFireholBlocklistCheck
             CURLOPT_HEADER => false,
             CURLOPT_CONNECTTIMEOUT => 5,
             CURLOPT_TIMEOUT => 12,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
             CURLOPT_HTTPHEADER => [
                 'Accept: text/plain',
                 'User-Agent: Sernate-FireHOL-Blocklist-Check-DirectAdmin/' . self::VERSION,
@@ -628,7 +698,7 @@ final class SernateFireholBlocklistCheck
             'include_stale' => !empty($config['include_stale']),
             'detected_ips' => $ips,
             'http_status' => $response['status_code'] ?? null,
-            'http_error' => $response['error'] ?? null,
+            'http_error' => self::cleanHeaderValue((string) ($response['error'] ?? '')),
             'ip_detection' => self::ipDetectionDebug(),
         ];
     }
