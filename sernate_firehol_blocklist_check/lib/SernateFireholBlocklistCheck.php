@@ -11,6 +11,7 @@ final class SernateFireholBlocklistCheck
     public const VERSION_URL = 'https://blocklist.sernate.com/version.txt';
     public const CONFIG_FILE = __DIR__ . '/../data/config.json';
     public const STATE_FILE = __DIR__ . '/../state/last_result.json';
+    public const DEBUG_FILE = __DIR__ . '/../state/debug.json';
     public const LOCK_FILE = __DIR__ . '/../state/check.lock';
 
     public static function defaultConfig(): array
@@ -88,7 +89,13 @@ final class SernateFireholBlocklistCheck
 
     public static function publicIpv4Addresses(): array
     {
+        return self::ipDetectionDebug()['ips'];
+    }
+
+    public static function ipDetectionDebug(): array
+    {
         $ips = [];
+        $debug = [];
         $commands = [
             '/sbin/ip -4 -o addr show scope global 2>/dev/null',
             '/usr/sbin/ip -4 -o addr show scope global 2>/dev/null',
@@ -102,15 +109,35 @@ final class SernateFireholBlocklistCheck
                 continue;
             }
 
-            preg_match_all('/\b(?:\d{1,3}\.){3}\d{1,3}\b/', $output, $matches);
-            foreach ($matches[0] ?? [] as $candidate) {
+            $found = [];
+            if (strpos($command, ' addr show ') !== false) {
+                preg_match_all('/\binet\s+((?:\d{1,3}\.){3}\d{1,3})\/\d+\b/', $output, $matches);
+                $found = $matches[1] ?? [];
+            } else {
+                preg_match_all('/\b(?:\d{1,3}\.){3}\d{1,3}\b/', $output, $matches);
+                $found = $matches[0] ?? [];
+            }
+
+            foreach ($found as $candidate) {
                 if (filter_var($candidate, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
                     $ips[$candidate] = true;
                 }
             }
+
+            $debug[] = [
+                'command' => preg_replace('/\s+/', ' ', $command),
+                'found' => array_values(array_unique($found)),
+                'output' => substr(trim($output), 0, 1200),
+            ];
         }
 
-        return array_keys($ips);
+        $ips = array_keys($ips);
+        sort($ips);
+
+        return [
+            'ips' => $ips,
+            'commands' => $debug,
+        ];
     }
 
     public static function runCheck(?array $ips = null, ?array $config = null): array
@@ -120,14 +147,15 @@ final class SernateFireholBlocklistCheck
         sort($ips);
 
         if ($ips === []) {
-            return [
+            return self::recordResult([
                 'ok' => false,
                 'status' => 'no_public_ips',
                 'message' => 'No public IPv4 addresses were detected on this server.',
                 'checked_at' => gmdate('c'),
                 'ips' => [],
                 'api' => null,
-            ];
+                'debug' => self::runtimeDebug($config, $ips, null),
+            ]);
         }
 
         $query = http_build_query([
@@ -139,26 +167,28 @@ final class SernateFireholBlocklistCheck
 
         $response = self::httpPost($url, $body);
         if (!$response['ok']) {
-            return [
+            return self::recordResult([
                 'ok' => false,
                 'status' => 'api_unavailable',
                 'message' => $response['error'] ?: 'The Sernate Blocklist API is unavailable.',
                 'checked_at' => gmdate('c'),
                 'ips' => $ips,
                 'api' => $response,
-            ];
+                'debug' => self::runtimeDebug($config, $ips, $response),
+            ]);
         }
 
         $json = json_decode((string) $response['body'], true);
         if (!is_array($json)) {
-            return [
+            return self::recordResult([
                 'ok' => false,
                 'status' => 'api_unavailable',
                 'message' => 'The API returned an invalid response.',
                 'checked_at' => gmdate('c'),
                 'ips' => $ips,
                 'api' => $response,
-            ];
+                'debug' => self::runtimeDebug($config, $ips, $response),
+            ]);
         }
 
         $status = self::classifyStatus($json, $config);
@@ -169,12 +199,10 @@ final class SernateFireholBlocklistCheck
             'checked_at' => gmdate('c'),
             'ips' => $ips,
             'api' => $json,
+            'debug' => self::runtimeDebug($config, $ips, ['ok' => true, 'status_code' => 200, 'error' => '']),
         ];
 
-        self::ensureWritableDirs();
-        self::writeJson(self::STATE_FILE, $result);
-
-        return $result;
+        return self::recordResult($result);
     }
 
     public static function loadLastResult(): ?array
@@ -184,6 +212,29 @@ final class SernateFireholBlocklistCheck
         }
 
         $decoded = json_decode((string) file_get_contents(self::STATE_FILE), true);
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    public static function recordDebug(string $action, array $extra = []): void
+    {
+        self::ensureWritableDirs();
+        self::writeJson(self::DEBUG_FILE, array_merge([
+            'action' => $action,
+            'at' => gmdate('c'),
+            'request_method' => (string) ($_SERVER['REQUEST_METHOD'] ?? ''),
+            'content_length' => (string) ($_SERVER['CONTENT_LENGTH'] ?? ''),
+            'post_keys' => array_keys($_POST),
+            'get_keys' => array_keys($_GET),
+        ], $extra));
+    }
+
+    public static function loadDebug(): ?array
+    {
+        if (!is_file(self::DEBUG_FILE)) {
+            return null;
+        }
+
+        $decoded = json_decode((string) file_get_contents(self::DEBUG_FILE), true);
         return is_array($decoded) ? $decoded : null;
     }
 
@@ -340,6 +391,7 @@ final class SernateFireholBlocklistCheck
     public static function statusLabel(string $status): string
     {
         return [
+            'not_checked' => 'Not Checked Yet',
             'clean' => 'Clean',
             'listed' => 'Listed',
             'history_only' => 'History Only',
@@ -430,5 +482,32 @@ final class SernateFireholBlocklistCheck
     private static function writeJson(string $path, array $value): void
     {
         file_put_contents($path, json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n", LOCK_EX);
+    }
+
+    private static function recordResult(array $result): array
+    {
+        self::ensureWritableDirs();
+        self::writeJson(self::STATE_FILE, $result);
+        self::recordDebug('run_check', [
+            'result_status' => $result['status'] ?? null,
+            'result_message' => $result['message'] ?? null,
+            'result_ips' => $result['ips'] ?? [],
+            'runtime' => $result['debug'] ?? null,
+        ]);
+
+        return $result;
+    }
+
+    private static function runtimeDebug(array $config, array $ips, ?array $response): array
+    {
+        return [
+            'api_base_url' => $config['api_base_url'] ?? self::DEFAULT_API_BASE_URL,
+            'current_only' => !empty($config['current_only']),
+            'include_stale' => !empty($config['include_stale']),
+            'detected_ips' => $ips,
+            'http_status' => $response['status_code'] ?? null,
+            'http_error' => $response['error'] ?? null,
+            'ip_detection' => self::ipDetectionDebug(),
+        ];
     }
 }

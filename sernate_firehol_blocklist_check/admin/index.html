@@ -7,18 +7,30 @@ require_once __DIR__ . '/../lib/SernateFireholBlocklistCheck.php';
 
 $notice = null;
 $error = null;
+$action = (string) ($_POST['action'] ?? $_GET['action'] ?? '');
 
-if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+if ($action !== '') {
     try {
-        if (($_POST['action'] ?? '') === 'save') {
+        SernateFireholBlocklistCheck::recordDebug('page_action', ['requested_action' => $action]);
+
+        if ($action === 'save') {
             SernateFireholBlocklistCheck::saveConfig($_POST);
             $notice = 'Settings saved.';
-        } elseif (($_POST['action'] ?? '') === 'check') {
+        } elseif ($action === 'check') {
             $result = SernateFireholBlocklistCheck::runCheck();
             $notice = 'Check completed: ' . SernateFireholBlocklistCheck::statusLabel((string) $result['status']) . '.';
+        } elseif ($action === 'debug') {
+            SernateFireholBlocklistCheck::recordDebug('manual_debug', [
+                'ip_detection' => SernateFireholBlocklistCheck::ipDetectionDebug(),
+            ]);
+            $notice = 'Debug information refreshed.';
         }
     } catch (Throwable $exception) {
         $error = $exception->getMessage();
+        SernateFireholBlocklistCheck::recordDebug('page_error', [
+            'requested_action' => $action,
+            'error' => $exception->getMessage(),
+        ]);
     }
 }
 
@@ -26,6 +38,8 @@ $config = SernateFireholBlocklistCheck::loadConfig();
 $last = SernateFireholBlocklistCheck::loadLastResult();
 $detectedIps = SernateFireholBlocklistCheck::publicIpv4Addresses();
 $update = SernateFireholBlocklistCheck::updateStatus();
+$debug = SernateFireholBlocklistCheck::loadDebug();
+$headerStatus = $last ? (string) $last['status'] : 'not_checked';
 
 function checkedAttr(bool $value): string
 {
@@ -50,7 +64,7 @@ function selectedAttr(int $actual, int $expected): string
     .sir-status.clean { background: #dcfce7; color: #166534; }
     .sir-status.listed { background: #fee2e2; color: #991b1b; }
     .sir-status.history_only, .sir-status.stale_source { background: #fef3c7; color: #92400e; }
-    .sir-status.api_unavailable, .sir-status.no_public_ips { background: #e5e7eb; color: #374151; }
+    .sir-status.api_unavailable, .sir-status.no_public_ips, .sir-status.not_checked { background: #e5e7eb; color: #374151; }
     .sir-alert { padding: 12px 14px; border-radius: 8px; margin: 0 0 14px; }
     .sir-alert.ok { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
     .sir-alert.err { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
@@ -68,6 +82,7 @@ function selectedAttr(int $actual, int $expected): string
     .sir-list { margin: 8px 0 0 18px; padding: 0; }
     .sir-update { display: grid; gap: 6px; }
     .sir-update strong { color: #172033; }
+    .sir-debug pre { white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow: auto; margin: 8px 0 0; padding: 10px; border: 1px solid #d7dde8; border-radius: 4px; background: rgba(0, 0, 0, .03); }
     @media (max-width: 860px) { .sir-grid, .sir-head { display: block; } .sir-card { margin-bottom: 16px; } }
 </style>
 
@@ -78,8 +93,8 @@ function selectedAttr(int $actual, int $expected): string
             <p class="sir-subtitle">Check whether this server's public IPv4 addresses appear in FireHOL IP blocklists indexed through the Sernate Blocklist API.</p>
         </div>
         <div>
-            <span class="sir-status <?= SernateFireholBlocklistCheck::html((string) ($last['status'] ?? 'no_public_ips')) ?>">
-                <?= SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::statusLabel((string) ($last['status'] ?? 'no_public_ips'))) ?>
+            <span class="sir-status <?= SernateFireholBlocklistCheck::html($headerStatus) ?>">
+                <?= SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::statusLabel($headerStatus)) ?>
             </span>
         </div>
     </div>
@@ -171,5 +186,18 @@ function selectedAttr(int $actual, int $expected): string
             <p class="sir-muted">No public IPv4 addresses detected. Private and reserved addresses are ignored.</p>
         <?php endif; ?>
         <p class="sir-small sir-muted">FireHOL and the upstream feed maintainers deserve credit for collecting, curating and maintaining the source blocklist data. Sernate provides the hosted API, indexing, history, freshness checks and this DirectAdmin plugin.</p>
+    </section>
+
+    <section class="sir-card sir-debug" style="margin-top:16px">
+        <h2>Debug</h2>
+        <form method="post" class="sir-actions" style="margin-top:0">
+            <input type="hidden" name="action" value="debug">
+            <button class="sir-btn secondary" type="submit">Refresh Debug</button>
+        </form>
+        <?php if ($debug): ?>
+            <pre><?= SernateFireholBlocklistCheck::html(json_encode($debug, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) ?: '') ?></pre>
+        <?php else: ?>
+            <p class="sir-muted">No debug information recorded yet.</p>
+        <?php endif; ?>
     </section>
 </div>
