@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 final class SernateFireholBlocklistCheck
 {
-    public const VERSION = '0.1.1';
+    public const VERSION = '0.1.2';
     public const PLUGIN_ID = 'sernate_firehol_blocklist_check';
     public const DEFAULT_API_BASE_URL = 'https://blocklist.sernate.com';
     public const TEST_IP = '223.244.22.213';
@@ -25,8 +25,6 @@ final class SernateFireholBlocklistCheck
             'notification_method' => 'directadmin',
             'notification_email' => '',
             'notification_from' => '',
-            'current_only' => true,
-            'include_stale' => false,
             'investigation_mode' => false,
             'last_scheduled_run_at' => null,
         ];
@@ -69,10 +67,10 @@ final class SernateFireholBlocklistCheck
         }
 
         $config['schedule_interval_hours'] = self::normalizeInterval((int) $config['schedule_interval_hours']);
-        $config['api_base_url'] = rtrim((string) $config['api_base_url'], '/');
-        $config['current_only'] = (bool) $config['current_only'];
-        $config['include_stale'] = (bool) $config['include_stale'];
+        $config['api_base_url'] = self::DEFAULT_API_BASE_URL;
         $config['investigation_mode'] = (bool) $config['investigation_mode'];
+        $config['current_only'] = !$config['investigation_mode'];
+        $config['include_stale'] = $config['investigation_mode'];
         if (!in_array($config['notification_method'], ['directadmin', 'email', 'both'], true)) {
             $config['notification_method'] = 'directadmin';
         }
@@ -88,12 +86,7 @@ final class SernateFireholBlocklistCheck
     public static function saveConfig(array $input): void
     {
         $config = self::loadConfig();
-        $apiBaseUrl = trim((string) ($input['api_base_url'] ?? self::DEFAULT_API_BASE_URL));
-        if ($apiBaseUrl === '') {
-            $apiBaseUrl = self::DEFAULT_API_BASE_URL;
-        }
-
-        $config['api_base_url'] = rtrim($apiBaseUrl, '/');
+        $config['api_base_url'] = self::DEFAULT_API_BASE_URL;
         $config['schedule_enabled'] = !empty($input['schedule_enabled']);
         $config['schedule_interval_hours'] = self::normalizeInterval((int) ($input['schedule_interval_hours'] ?? 6));
         $config['notify_on_new_listings'] = !empty($input['notify_on_new_listings']);
@@ -422,6 +415,19 @@ final class SernateFireholBlocklistCheck
 
         ksort($rows);
         return array_values($rows);
+    }
+
+    public static function hitStatusLabel(array $hit): string
+    {
+        if (($hit['current_status'] ?? '') === 'present') {
+            return 'currently listed';
+        }
+
+        if (($hit['current_status'] ?? '') === 'absent') {
+            return 'historical only';
+        }
+
+        return (string) ($hit['current_status'] ?? 'unknown');
     }
 
     public static function updateStatus(): array

@@ -107,6 +107,7 @@ function selectedAttr($actual, $expected): string
         <div>
             <h1 class="sir-title">Sernate FireHOL Blocklist Check</h1>
             <p class="sir-subtitle">Check whether this server's public IPv4 addresses appear in FireHOL IP blocklists indexed through the Sernate Blocklist API.</p>
+            <p class="sir-small sir-help">Sernate indexes IPs collected from multiple external blocklist sources. We do not maintain those source lists and cannot remove IPs from them. If a removal is needed, contact the maintainer shown for the relevant feed.</p>
         </div>
         <div>
             <span class="sir-status <?= SernateFireholBlocklistCheck::html($headerStatus) ?>">
@@ -150,9 +151,11 @@ function selectedAttr($actual, $expected): string
                                 <?php foreach (($row['hits'] ?? []) as $hit): ?>
                                     <div class="sir-small">
                                         <strong><?= SernateFireholBlocklistCheck::html((string) ($hit['feed_name'] ?? 'Unknown feed')) ?></strong>
-                                        <?php if (!empty($hit['current_status'])): ?> · <?= SernateFireholBlocklistCheck::html((string) $hit['current_status']) ?><?php endif; ?>
+                                        <?php if (!empty($hit['current_status'])): ?> · <?= SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::hitStatusLabel($hit)) ?><?php endif; ?>
                                         <?php if (!empty($hit['source_is_stale'])): ?> · stale source<?php endif; ?>
                                         <?php if (!empty($hit['maintainer'])): ?><br><span class="sir-muted"><?= SernateFireholBlocklistCheck::html((string) $hit['maintainer']) ?></span><?php endif; ?>
+                                        <?php if (!empty($hit['maintainer_url'])): ?><br><a href="<?= SernateFireholBlocklistCheck::html((string) $hit['maintainer_url']) ?>" target="_blank" rel="noopener noreferrer"><?= SernateFireholBlocklistCheck::html((string) $hit['maintainer_url']) ?></a><?php endif; ?>
+                                        <?php if (!empty($hit['list_source_url'])): ?><br><span class="sir-muted">Source:</span> <a href="<?= SernateFireholBlocklistCheck::html((string) $hit['list_source_url']) ?>" target="_blank" rel="noopener noreferrer"><?= SernateFireholBlocklistCheck::html((string) $hit['list_source_url']) ?></a><?php endif; ?>
                                     </div>
                                 <?php endforeach; ?>
                             </td>
@@ -177,8 +180,9 @@ function selectedAttr($actual, $expected): string
             <form method="get">
                 <input type="hidden" name="action" value="save">
                 <div class="sir-form-row">
-                    <label class="sir-label" for="api_base_url">API base URL</label>
-                    <input class="sir-input" id="api_base_url" name="api_base_url" value="<?= SernateFireholBlocklistCheck::html((string) $config['api_base_url']) ?>">
+                    <span class="sir-label">API</span>
+                    <div><?= SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::DEFAULT_API_BASE_URL) ?></div>
+                    <div class="sir-small sir-help">This plugin always uses the Sernate Blocklist API.</div>
                 </div>
                 <div class="sir-form-row">
                     <label class="sir-check"><input type="checkbox" name="schedule_enabled" value="1"<?= checkedAttr((bool) $config['schedule_enabled']) ?>> Enable automatic checks</label>
@@ -208,6 +212,7 @@ function selectedAttr($actual, $expected): string
                     <div class="sir-small sir-help">Leave empty to use the server mail default. A custom From header is only used when it is a valid email address.</div>
                 </div>
                 <label class="sir-check"><input type="checkbox" name="investigation_mode" value="1"<?= checkedAttr((bool) $config['investigation_mode']) ?>> Investigation mode: include historical removed listings and stale sources</label>
+                <div class="sir-small sir-help">Default mode shows only current fresh listings. Investigation mode also shows IPs that were listed before but are no longer currently present.</div>
                 <div class="sir-actions">
                     <button class="sir-btn secondary" type="submit">Save Settings</button>
                 </div>
@@ -236,7 +241,7 @@ function selectedAttr($actual, $expected): string
         <?php else: ?>
             <p class="sir-muted">No public IPv4 addresses detected. Private and reserved addresses are ignored.</p>
         <?php endif; ?>
-        <p class="sir-small sir-muted">FireHOL and the upstream feed maintainers deserve credit for collecting, curating and maintaining the source blocklist data. Sernate provides the hosted API, indexing, history, freshness checks and this DirectAdmin plugin.</p>
+        <p class="sir-small sir-muted">FireHOL and the upstream feed maintainers deserve credit for collecting, curating and maintaining the source blocklist data. Sernate provides the hosted API, indexing, history, freshness checks and this DirectAdmin plugin. Removal requests must go to the maintainer of the source list where the IP appears.</p>
     </section>
 
     <section class="sir-card sir-debug" style="margin-top:16px">
