@@ -1,0 +1,16 @@
+[
+  {
+    "name": "Sernate",
+    "icon": "/CMD_PLUGINS_ADMIN/sernate_firehol_blocklist_check/images/admin_icon.svg",
+    "entries": [
+      {
+        "name": "FireHOL Blocklist Check",
+        "icon": "/CMD_PLUGINS_ADMIN/sernate_firehol_blocklist_check/images/admin_icon.svg",
+        "href": "/CMD_PLUGINS_ADMIN/sernate_firehol_blocklist_check",
+        "newTab": false,
+        "updates": 0
+      }
+    ]
+  }
+]
+

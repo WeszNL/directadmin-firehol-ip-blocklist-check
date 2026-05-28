@@ -1,0 +1,6 @@
+dist/
+.agents/
+.codex/
+sernate_firehol_blocklist_check/data/*.json
+sernate_firehol_blocklist_check/state/*.json
+sernate_firehol_blocklist_check/state/*.lock
