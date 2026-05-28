@@ -27,11 +27,6 @@ if ($action !== '') {
             $ips[] = SernateFireholBlocklistCheck::TEST_IP;
             $result = SernateFireholBlocklistCheck::runCheck(array_values(array_unique($ips)));
             $notice = 'Test IP included: ' . (string) $result['message'];
-        } elseif ($action === 'debug') {
-            SernateFireholBlocklistCheck::recordDebug('manual_debug', [
-                'ip_detection' => SernateFireholBlocklistCheck::ipDetectionDebug(),
-            ]);
-            $notice = 'Debug information refreshed.';
         }
     } catch (Throwable $exception) {
         $error = $exception->getMessage();
@@ -46,7 +41,6 @@ $config = SernateFireholBlocklistCheck::loadConfig();
 $last = SernateFireholBlocklistCheck::loadLastResult();
 $detectedIps = SernateFireholBlocklistCheck::publicIpv4Addresses();
 $update = SernateFireholBlocklistCheck::updateStatus();
-$debug = SernateFireholBlocklistCheck::loadDebug();
 $headerStatus = $last ? (string) $last['status'] : 'not_checked';
 $resultRows = SernateFireholBlocklistCheck::resultRows($last);
 
@@ -69,7 +63,7 @@ function selectedAttr($actual, $expected): string
     .sir-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 0.8fr); gap: 14px; align-items: start; }
     .sir-card { border: 1px solid #d7dde8; border-radius: 4px; padding: 14px; background: transparent; }
     .sir-card h2 { margin: 0 0 12px; font-size: 15px; font-weight: 700; color: #111827; }
-    .sir-status { display: inline-flex; align-items: center; min-height: 32px; padding: 0 12px; border-radius: 999px; font-weight: 700; }
+    .sir-status { display: inline-flex; align-items: center; justify-content: center; min-height: 34px; min-width: 128px; padding: 0 14px; border-radius: 999px; font-weight: 700; white-space: nowrap; }
     .sir-status.clean { background: #dcfce7; color: #166534; }
     .sir-status.listed { background: #fee2e2; color: #991b1b; }
     .sir-status.history_only, .sir-status.stale_source { background: #fef3c7; color: #92400e; }
@@ -95,7 +89,6 @@ function selectedAttr($actual, $expected): string
     .sir-list { margin: 8px 0 0 18px; padding: 0; }
     .sir-update { display: grid; gap: 6px; }
     .sir-update strong { color: #172033; }
-    .sir-debug pre { white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow: auto; margin: 8px 0 0; padding: 10px; border: 1px solid #d7dde8; border-radius: 4px; background: rgba(0, 0, 0, .03); }
     .sir-pill { display: inline-block; padding: 3px 8px; border-radius: 999px; font-weight: 700; font-size: 12px; }
     .sir-pill.clean { background: #dcfce7; color: #166534; }
     .sir-pill.listed { background: #fee2e2; color: #991b1b; }
@@ -249,19 +242,6 @@ function selectedAttr($actual, $expected): string
             <p class="sir-muted">No public IPv4 addresses detected. Private and reserved addresses are ignored.</p>
         <?php endif; ?>
         <p class="sir-small sir-muted">FireHOL and the upstream feed maintainers deserve credit for collecting, curating and maintaining the source blocklist data. Sernate provides the hosted API, indexing, history, freshness checks and this DirectAdmin plugin. Removal requests must go to the maintainer of the source list where the IP appears.</p>
-    </section>
-
-    <section class="sir-card sir-debug" style="margin-top:16px">
-        <h2>Debug</h2>
-        <form method="get" class="sir-actions" style="margin-top:0">
-            <input type="hidden" name="action" value="debug">
-            <button class="sir-btn secondary" type="submit">Refresh Debug</button>
-        </form>
-        <?php if ($debug): ?>
-            <pre><?= SernateFireholBlocklistCheck::html(json_encode($debug, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) ?: '') ?></pre>
-        <?php else: ?>
-            <p class="sir-muted">No debug information recorded yet.</p>
-        <?php endif; ?>
     </section>
 </div>
 <script>
