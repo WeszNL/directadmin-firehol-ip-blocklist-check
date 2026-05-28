@@ -62,11 +62,11 @@ function selectedAttr($actual, $expected): string
 
 ?>
 <style>
-    .sir-wrap { color: #1f2937; font-family: Roboto, "Open Sans", Arial, Helvetica, sans-serif; font-size: 14px; }
+    .sir-wrap { color: #1f2937; font-family: Roboto, "Open Sans", Arial, Helvetica, sans-serif; font-size: 14px; max-width: 1280px; margin: 0 auto; padding: 0 16px; }
     .sir-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin: 0 0 14px; }
     .sir-title { margin: 0; font-size: 20px; line-height: 1.25; font-weight: 700; }
     .sir-subtitle { margin: 6px 0 0; color: #667085; max-width: 820px; line-height: 1.45; }
-    .sir-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr); gap: 14px; }
+    .sir-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 0.8fr); gap: 14px; align-items: start; }
     .sir-card { border: 1px solid #d7dde8; border-radius: 4px; padding: 14px; background: transparent; }
     .sir-card h2 { margin: 0 0 12px; font-size: 15px; font-weight: 700; color: #111827; }
     .sir-status { display: inline-flex; align-items: center; min-height: 32px; padding: 0 12px; border-radius: 999px; font-weight: 700; }
@@ -101,6 +101,7 @@ function selectedAttr($actual, $expected): string
     .sir-help { color: #667085; margin-top: 5px; }
     .sir-select:disabled { background: #f3f4f6; color: #9ca3af; cursor: not-allowed; }
     @media (max-width: 860px) { .sir-grid, .sir-head { display: block; } .sir-card { margin-bottom: 16px; } }
+    @media (min-width: 861px) { .sir-grid .sir-card { min-height: 0; } }
 </style>
 
 <div class="sir-wrap">
