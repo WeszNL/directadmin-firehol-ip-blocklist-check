@@ -24,15 +24,15 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
 $config = SernateFireholBlocklistCheck::loadConfig();
 $last = SernateFireholBlocklistCheck::loadLastResult();
-$detectedIps = SernateFireholBlocklistCheck::openbareIpv4Adressen();
+$detectedIps = SernateFireholBlocklistCheck::publicIpv4Addresses();
 $update = SernateFireholBlocklistCheck::updateStatus();
 
-function aangevinkt(bool $value): string
+function checkedAttr(bool $value): string
 {
     return $value ? ' checked' : '';
 }
 
-function geselecteerd(int $actual, int $expected): string
+function selectedAttr(int $actual, int $expected): string
 {
     return $actual === $expected ? ' selected' : '';
 }
@@ -132,16 +132,16 @@ function geselecteerd(int $actual, int $expected): string
                     <input class="sir-input" id="api_base_url" name="api_base_url" value="<?= SernateFireholBlocklistCheck::html((string) $config['api_base_url']) ?>">
                 </div>
                 <div class="sir-form-row">
-                    <label class="sir-check"><input type="checkbox" name="schedule_enabled" value="1"<?= aangevinkt((bool) $config['schedule_enabled']) ?>> Enable automatic checks</label>
+                    <label class="sir-check"><input type="checkbox" name="schedule_enabled" value="1"<?= checkedAttr((bool) $config['schedule_enabled']) ?>> Enable automatic checks</label>
                     <label class="sir-label" for="schedule_interval_hours">Check interval</label>
                     <select class="sir-select" id="schedule_interval_hours" name="schedule_interval_hours">
                         <?php foreach ([4, 6, 8, 12, 24] as $hours): ?>
-                            <option value="<?= $hours ?>"<?= geselecteerd((int) $config['schedule_interval_hours'], $hours) ?>>Every <?= $hours ?> hours</option>
+                            <option value="<?= $hours ?>"<?= selectedAttr((int) $config['schedule_interval_hours'], $hours) ?>>Every <?= $hours ?> hours</option>
                         <?php endforeach; ?>
                     </select>
                 </div>
-                <label class="sir-check"><input type="checkbox" name="notify_on_new_listings" value="1"<?= aangevinkt((bool) $config['notify_on_new_listings']) ?>> Notify DirectAdmin admin when new active listings are found</label>
-                <label class="sir-check"><input type="checkbox" name="investigation_mode" value="1"<?= aangevinkt((bool) $config['investigation_mode']) ?>> Investigation mode: include historical removed listings and stale sources</label>
+                <label class="sir-check"><input type="checkbox" name="notify_on_new_listings" value="1"<?= checkedAttr((bool) $config['notify_on_new_listings']) ?>> Notify DirectAdmin admin when new active listings are found</label>
+                <label class="sir-check"><input type="checkbox" name="investigation_mode" value="1"<?= checkedAttr((bool) $config['investigation_mode']) ?>> Investigation mode: include historical removed listings and stale sources</label>
                 <div class="sir-actions">
                     <button class="sir-btn secondary" type="submit">Save Settings</button>
                 </div>

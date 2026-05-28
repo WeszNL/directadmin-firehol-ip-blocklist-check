@@ -86,7 +86,7 @@ final class SernateFireholBlocklistCheck
         }
     }
 
-    public static function openbareIpv4Adressen(): array
+    public static function publicIpv4Addresses(): array
     {
         $ips = [];
         $commands = [
@@ -116,7 +116,7 @@ final class SernateFireholBlocklistCheck
     public static function runCheck(?array $ips = null, ?array $config = null): array
     {
         $config = $config ?? self::loadConfig();
-        $ips = $ips ?? self::openbareIpv4Adressen();
+        $ips = $ips ?? self::publicIpv4Addresses();
         sort($ips);
 
         if ($ips === []) {
@@ -266,7 +266,7 @@ final class SernateFireholBlocklistCheck
         $subject = rawurlencode('Sernate FireHOL Blocklist Check: IP listed');
         $message = rawurlencode("One or more public server IPs appear in indexed FireHOL blocklists.\n\nIPs: " . $ips . "\n\nOpen DirectAdmin > Sernate FireHOL Blocklist Check for details.");
         $line = "action=notify&value=admin&subject={$subject}&message={$message}\n";
-        // Lekker saai houden: melden in DirectAdmin, niet blokkeren of firewall regels rommelen.
+        // This plugin reports listings only; it never changes firewall rules.
         @file_put_contents('/usr/local/directadmin/data/task.queue', $line, FILE_APPEND | LOCK_EX);
     }
 
