@@ -5,6 +5,8 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../lib/SernateFireholBlocklistCheck.php';
 
+SernateFireholBlocklistCheck::loadDirectAdminRequest();
+
 $notice = null;
 $error = null;
 $action = (string) ($_POST['action'] ?? $_GET['action'] ?? '');
@@ -132,7 +134,7 @@ function selectedAttr(int $actual, int $expected): string
                 <p class="sir-muted">No check has been run yet.</p>
             <?php endif; ?>
 
-            <form method="post" class="sir-actions">
+            <form method="get" class="sir-actions">
                 <input type="hidden" name="action" value="check">
                 <button class="sir-btn" type="submit">Run Check Now</button>
             </form>
@@ -140,7 +142,7 @@ function selectedAttr(int $actual, int $expected): string
 
         <section class="sir-card">
             <h2>Settings</h2>
-            <form method="post">
+            <form method="get">
                 <input type="hidden" name="action" value="save">
                 <div class="sir-form-row">
                     <label class="sir-label" for="api_base_url">API base URL</label>
@@ -190,7 +192,7 @@ function selectedAttr(int $actual, int $expected): string
 
     <section class="sir-card sir-debug" style="margin-top:16px">
         <h2>Debug</h2>
-        <form method="post" class="sir-actions" style="margin-top:0">
+        <form method="get" class="sir-actions" style="margin-top:0">
             <input type="hidden" name="action" value="debug">
             <button class="sir-btn secondary" type="submit">Refresh Debug</button>
         </form>

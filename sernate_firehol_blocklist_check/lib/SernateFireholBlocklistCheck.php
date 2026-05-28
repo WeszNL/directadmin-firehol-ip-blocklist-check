@@ -28,6 +28,31 @@ final class SernateFireholBlocklistCheck
         ];
     }
 
+    public static function loadDirectAdminRequest(): void
+    {
+        $_GET = self::parseDirectAdminRequestString((string) getenv('QUERY_STRING'));
+        $_POST = self::parseDirectAdminRequestString((string) getenv('POST'));
+    }
+
+    public static function parseDirectAdminRequestString(string $value): array
+    {
+        if ($value === '') {
+            return [];
+        }
+
+        $parsed = [];
+        parse_str(html_entity_decode($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), $parsed);
+
+        $clean = [];
+        foreach ($parsed as $key => $item) {
+            if (is_string($key)) {
+                $clean[urldecode($key)] = is_string($item) ? urldecode($item) : $item;
+            }
+        }
+
+        return $clean;
+    }
+
     public static function loadConfig(): array
     {
         $config = self::defaultConfig();
@@ -223,6 +248,8 @@ final class SernateFireholBlocklistCheck
             'at' => gmdate('c'),
             'request_method' => (string) ($_SERVER['REQUEST_METHOD'] ?? ''),
             'content_length' => (string) ($_SERVER['CONTENT_LENGTH'] ?? ''),
+            'env_query_string' => (string) getenv('QUERY_STRING'),
+            'env_post' => substr((string) getenv('POST'), 0, 1200),
             'post_keys' => array_keys($_POST),
             'get_keys' => array_keys($_GET),
         ], $extra));
