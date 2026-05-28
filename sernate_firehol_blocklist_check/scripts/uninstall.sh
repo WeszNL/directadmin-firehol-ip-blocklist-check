@@ -1,10 +1,19 @@
 #!/bin/sh
 set -eu
 
-CRON_FILE="/etc/cron.d/sernate-firehol-blocklist-check"
-if [ -f "$CRON_FILE" ] && [ -w /etc/cron.d ]; then
-  rm -f "$CRON_FILE"
+PLUGIN_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+for CRON_FILE in \
+  /etc/cron.d/sernate-firehol-blocklist-check \
+  /etc/cron.d/sernate-ip-reputation
+do
+  if [ -f "$CRON_FILE" ]; then
+    rm -f "$CRON_FILE"
+  fi
+done
+
+if [ -f "$PLUGIN_DIR/state/check.lock" ]; then
+  rm -f "$PLUGIN_DIR/state/check.lock"
 fi
 
 exit 0
-

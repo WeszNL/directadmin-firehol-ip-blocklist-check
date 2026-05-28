@@ -7,6 +7,8 @@ final class SernateFireholBlocklistCheck
     public const VERSION = '0.1.0';
     public const PLUGIN_ID = 'sernate_firehol_blocklist_check';
     public const DEFAULT_API_BASE_URL = 'https://blocklist.sernate.com';
+    public const UPDATE_URL = 'https://blocklist.sernate.com/sernate_firehol_blocklist_check.tar.gz';
+    public const VERSION_URL = 'https://blocklist.sernate.com/version.txt';
     public const CONFIG_FILE = __DIR__ . '/../data/config.json';
     public const STATE_FILE = __DIR__ . '/../state/last_result.json';
     public const LOCK_FILE = __DIR__ . '/../state/check.lock';
@@ -268,6 +270,52 @@ final class SernateFireholBlocklistCheck
         @file_put_contents('/usr/local/directadmin/data/task.queue', $line, FILE_APPEND | LOCK_EX);
     }
 
+    public static function updateStatus(): array
+    {
+        $response = self::httpGet(self::VERSION_URL);
+        if (!$response['ok']) {
+            return [
+                'ok' => false,
+                'installed' => self::VERSION,
+                'latest' => null,
+                'update_available' => false,
+                'message' => $response['error'] ?: 'Could not check for updates.',
+            ];
+        }
+
+        $latest = self::extractVersion((string) $response['body']);
+        if ($latest === null) {
+            return [
+                'ok' => false,
+                'installed' => self::VERSION,
+                'latest' => null,
+                'update_available' => false,
+                'message' => 'Update version file did not contain a version number.',
+            ];
+        }
+
+        $available = version_compare($latest, self::VERSION, '>');
+
+        return [
+            'ok' => true,
+            'installed' => self::VERSION,
+            'latest' => $latest,
+            'update_available' => $available,
+            'message' => $available ? 'A new plugin version is available.' : 'Plugin is up to date.',
+            'update_url' => self::UPDATE_URL,
+            'version_url' => self::VERSION_URL,
+        ];
+    }
+
+    public static function extractVersion(string $body): ?string
+    {
+        if (preg_match('/\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b/', $body, $match)) {
+            return $match[1];
+        }
+
+        return null;
+    }
+
     public static function classifyStatus(array $api, array $config): string
     {
         if ((int) ($api['currently_blacklisted_count'] ?? 0) > 0) {
@@ -303,6 +351,10 @@ final class SernateFireholBlocklistCheck
 
     public static function httpPost(string $url, string $body): array
     {
+        if (!function_exists('curl_init')) {
+            return ['ok' => false, 'error' => 'PHP cURL extension is not available.', 'status_code' => 0, 'body' => null];
+        }
+
         $ch = curl_init($url);
         if (!$ch) {
             return ['ok' => false, 'error' => 'Unable to initialize cURL.', 'status_code' => 0, 'body' => null];
@@ -318,6 +370,41 @@ final class SernateFireholBlocklistCheck
             CURLOPT_HTTPHEADER => [
                 'Content-Type: text/plain',
                 'Accept: application/json',
+                'User-Agent: Sernate-FireHOL-Blocklist-Check-DirectAdmin/' . self::VERSION,
+            ],
+        ]);
+
+        $responseBody = curl_exec($ch);
+        $error = curl_error($ch);
+        $statusCode = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        curl_close($ch);
+
+        return [
+            'ok' => $responseBody !== false && $statusCode >= 200 && $statusCode < 300,
+            'error' => $error ?: ($statusCode >= 400 ? 'HTTP ' . $statusCode : ''),
+            'status_code' => $statusCode,
+            'body' => $responseBody,
+        ];
+    }
+
+    public static function httpGet(string $url): array
+    {
+        if (!function_exists('curl_init')) {
+            return ['ok' => false, 'error' => 'PHP cURL extension is not available.', 'status_code' => 0, 'body' => null];
+        }
+
+        $ch = curl_init($url);
+        if (!$ch) {
+            return ['ok' => false, 'error' => 'Unable to initialize cURL.', 'status_code' => 0, 'body' => null];
+        }
+
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HEADER => false,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT => 12,
+            CURLOPT_HTTPHEADER => [
+                'Accept: text/plain',
                 'User-Agent: Sernate-FireHOL-Blocklist-Check-DirectAdmin/' . self::VERSION,
             ],
         ]);

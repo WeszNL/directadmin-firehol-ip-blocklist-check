@@ -40,14 +40,22 @@ DirectAdmin plugin packages use a `plugin.conf` file and executable user level e
 
 ## Updates
 
-DirectAdmin supports plugin updates through `update_url` and `version_url` in `plugin.conf`. These are intentionally empty until the public GitHub release URL exists.
+DirectAdmin supports plugin updates through `update_url` and `version_url` in `plugin.conf`.
 
-When the GitHub repository is public, set:
+This build checks:
 
 ```ini
-update_url=https://github.com/sernate/sernate-firehol-blocklist-check/releases/latest/download/sernate_firehol_blocklist_check.tar.gz
-version_url=https://github.com/sernate/sernate-firehol-blocklist-check/releases/latest/download/version.txt
+update_url=https://blocklist.sernate.com/sernate_firehol_blocklist_check.tar.gz
+version_url=https://blocklist.sernate.com/version.txt
 ```
+
+The admin plugin page also shows the installed version, latest version and whether an update is available.
+
+`version.txt` should contain a plain semantic version such as `0.1.1`.
+
+## Uninstall
+
+Uninstall from DirectAdmin Plugin Manager. The uninstall script removes the plugin cron file and any leftover lock file. It does not remove saved check history before DirectAdmin removes the plugin directory.
 
 ## API
 
