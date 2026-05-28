@@ -99,6 +99,7 @@ function selectedAttr($actual, $expected): string
     .sir-pill.clean { background: #dcfce7; color: #166534; }
     .sir-pill.listed { background: #fee2e2; color: #991b1b; }
     .sir-help { color: #667085; margin-top: 5px; }
+    .sir-select:disabled { background: #f3f4f6; color: #9ca3af; cursor: not-allowed; }
     @media (max-width: 860px) { .sir-grid, .sir-head { display: block; } .sir-card { margin-bottom: 16px; } }
 </style>
 
@@ -185,9 +186,9 @@ function selectedAttr($actual, $expected): string
                     <div class="sir-small sir-help">This plugin always uses the Sernate Blocklist API.</div>
                 </div>
                 <div class="sir-form-row">
-                    <label class="sir-check"><input type="checkbox" name="schedule_enabled" value="1"<?= checkedAttr((bool) $config['schedule_enabled']) ?>> Enable automatic checks</label>
+                    <label class="sir-check"><input id="schedule_enabled" type="checkbox" name="schedule_enabled" value="1"<?= checkedAttr((bool) $config['schedule_enabled']) ?>> Enable automatic checks</label>
                     <label class="sir-label" for="schedule_interval_hours">Check interval</label>
-                    <select class="sir-select" id="schedule_interval_hours" name="schedule_interval_hours">
+                    <select class="sir-select" id="schedule_interval_hours" name="schedule_interval_hours"<?= empty($config['schedule_enabled']) ? ' disabled' : '' ?>>
                         <?php foreach ([4, 6, 8, 12, 24] as $hours): ?>
                             <option value="<?= $hours ?>"<?= selectedAttr((int) $config['schedule_interval_hours'], $hours) ?>>Every <?= $hours ?> hours</option>
                         <?php endforeach; ?>
@@ -257,3 +258,16 @@ function selectedAttr($actual, $expected): string
         <?php endif; ?>
     </section>
 </div>
+<script>
+    (function () {
+        var enabled = document.getElementById('schedule_enabled');
+        var interval = document.getElementById('schedule_interval_hours');
+        if (!enabled || !interval) {
+            return;
+        }
+
+        enabled.addEventListener('change', function () {
+            interval.disabled = !enabled.checked;
+        });
+    }());
+</script>
