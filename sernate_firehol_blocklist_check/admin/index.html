@@ -28,7 +28,7 @@ if ($action !== '') {
                 throw new RuntimeException('Enter a valid IPv4 address.');
             }
 
-            $result = SernateFireholBlocklistCheck::runCheck([$manualIp]);
+            $result = SernateFireholBlocklistCheck::runCheck([$manualIp], null, 'manual');
             $notice = 'Manual check for ' . $manualIp . ': ' . (string) $result['message'];
         }
     } catch (Throwable $exception) {
@@ -42,10 +42,12 @@ if ($action !== '') {
 
 $config = SernateFireholBlocklistCheck::loadConfig();
 $last = SernateFireholBlocklistCheck::loadLastResult();
+$manualLast = SernateFireholBlocklistCheck::loadManualResult();
 $detectedIps = SernateFireholBlocklistCheck::publicIpv4Addresses();
 $update = SernateFireholBlocklistCheck::updateStatus();
 $headerStatus = $last ? (string) $last['status'] : 'not_checked';
 $resultRows = SernateFireholBlocklistCheck::resultRows($last);
+$manualRows = SernateFireholBlocklistCheck::resultRows($manualLast);
 
 function checkedAttr(bool $value): string
 {
@@ -121,9 +123,9 @@ function selectedAttr($actual, $expected): string
 
     <div class="sir-grid">
         <section class="sir-card">
-            <h2>Current Result</h2>
+            <h2>Server IP Result</h2>
             <?php if ($last): ?>
-                <p class="sir-muted">Last checked: <?= SernateFireholBlocklistCheck::html((string) $last['checked_at']) ?></p>
+                <p class="sir-muted">Last checked: <?= SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::humanTime((string) $last['checked_at'])) ?></p>
                 <?php if (($last['status'] ?? '') === 'clean'): ?>
                     <div class="sir-alert sir-result-clean"><strong>Clean:</strong> none of the checked IP addresses were found in current fresh FireHOL blocklists.</div>
                 <?php elseif (($last['status'] ?? '') === 'listed'): ?>
@@ -134,7 +136,7 @@ function selectedAttr($actual, $expected): string
                     <div class="sir-alert sir-result-neutral"><?= SernateFireholBlocklistCheck::html((string) ($last['message'] ?? 'Result available.')) ?></div>
                 <?php endif; ?>
                 <table class="sir-table">
-                    <thead><tr><th>IP</th><th>Status</th><th>Feeds</th></tr></thead>
+                    <thead><tr><th>IP</th><th>Status</th><th>Last Checked</th><th>Feeds</th></tr></thead>
                     <tbody>
                     <?php foreach ($resultRows as $row): ?>
                         <tr>
@@ -146,6 +148,7 @@ function selectedAttr($actual, $expected): string
                                     <span class="sir-pill clean">Not found</span>
                                 <?php endif; ?>
                             </td>
+                            <td><?= SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::humanTime((string) ($row['last_checked_at'] ?? ''))) ?></td>
                             <td>
                                 <?php if (empty($row['hits'])): ?>
                                     <span class="sir-muted">No current listing in checked FireHOL feeds.</span>
@@ -180,7 +183,7 @@ function selectedAttr($actual, $expected): string
                 <input class="sir-input sir-inline-input" name="manual_ip" placeholder="IPv4 address">
                 <button class="sir-btn secondary" type="submit">Search IP</button>
             </form>
-            <p class="sir-small sir-help">Manual search checks one IPv4 address. If it appears in multiple feeds, each matching feed is shown in the result.</p>
+            <p class="sir-small sir-help">Manual search checks only the typed IPv4 address. It does not recheck or replace the server IP result above.</p>
         </section>
 
         <section class="sir-card">
@@ -227,6 +230,55 @@ function selectedAttr($actual, $expected): string
             </form>
         </section>
     </div>
+
+    <?php if ($manualLast): ?>
+        <section class="sir-card" style="margin-top:16px">
+            <h2>Manual Search Result</h2>
+            <p class="sir-muted">Last checked: <?= SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::humanTime((string) $manualLast['checked_at'])) ?></p>
+            <?php if (($manualLast['status'] ?? '') === 'clean'): ?>
+                <div class="sir-alert sir-result-clean"><strong>Clean:</strong> this IP was not found in current fresh FireHOL blocklists.</div>
+            <?php elseif (($manualLast['status'] ?? '') === 'listed'): ?>
+                <div class="sir-alert sir-result-listed"><strong>Listed:</strong> this IP appears in one or more indexed FireHOL blocklists.</div>
+            <?php else: ?>
+                <div class="sir-alert sir-result-neutral"><?= SernateFireholBlocklistCheck::html((string) ($manualLast['message'] ?? 'Result available.')) ?></div>
+            <?php endif; ?>
+            <table class="sir-table">
+                <thead><tr><th>IP</th><th>Status</th><th>Last Checked</th><th>Feeds</th></tr></thead>
+                <tbody>
+                <?php foreach ($manualRows as $row): ?>
+                    <tr>
+                        <td><?= SernateFireholBlocklistCheck::html((string) ($row['ip'] ?? '')) ?></td>
+                        <td>
+                            <?php if (!empty($row['currently_blacklisted'])): ?>
+                                <span class="sir-pill listed">Listed</span>
+                            <?php else: ?>
+                                <span class="sir-pill clean">Not found</span>
+                            <?php endif; ?>
+                        </td>
+                        <td><?= SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::humanTime((string) ($row['last_checked_at'] ?? ''))) ?></td>
+                        <td>
+                            <?php if (empty($row['hits'])): ?>
+                                <span class="sir-muted">No current listing in checked FireHOL feeds.</span>
+                            <?php endif; ?>
+                            <?php foreach (($row['hits'] ?? []) as $hit): ?>
+                                <div class="sir-small">
+                                    <strong><?= SernateFireholBlocklistCheck::html((string) ($hit['feed_name'] ?? 'Unknown feed')) ?></strong>
+                                    <?php if (!empty($hit['current_status'])): ?> · <?= SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::hitStatusLabel($hit)) ?><?php endif; ?>
+                                    <?php if (!empty($hit['source_is_stale'])): ?> · stale source<?php endif; ?>
+                                    <?php if (!empty($hit['maintainer'])): ?><br><span class="sir-muted"><?= SernateFireholBlocklistCheck::html((string) $hit['maintainer']) ?></span><?php endif; ?>
+                                    <?php $maintainerUrl = SernateFireholBlocklistCheck::safeUrl((string) ($hit['maintainer_url'] ?? '')); ?>
+                                    <?php $sourceUrl = SernateFireholBlocklistCheck::safeUrl((string) ($hit['list_source_url'] ?? '')); ?>
+                                    <?php if ($maintainerUrl !== ''): ?><br><a href="<?= SernateFireholBlocklistCheck::html($maintainerUrl) ?>" target="_blank" rel="noopener noreferrer"><?= SernateFireholBlocklistCheck::html($maintainerUrl) ?></a><?php endif; ?>
+                                    <?php if ($sourceUrl !== ''): ?><br><span class="sir-muted">Source:</span> <a href="<?= SernateFireholBlocklistCheck::html($sourceUrl) ?>" target="_blank" rel="noopener noreferrer"><?= SernateFireholBlocklistCheck::html($sourceUrl) ?></a><?php endif; ?>
+                                </div>
+                            <?php endforeach; ?>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </section>
+    <?php endif; ?>
 
     <section class="sir-card" style="margin-top:16px">
         <h2>Updates</h2>

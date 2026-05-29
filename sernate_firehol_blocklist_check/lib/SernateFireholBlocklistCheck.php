@@ -4,13 +4,15 @@ declare(strict_types=1);
 
 final class SernateFireholBlocklistCheck
 {
-    public const VERSION = '0.1.4';
+    public const VERSION = '0.1.5';
     public const PLUGIN_ID = 'sernate_firehol_blocklist_check';
     public const DEFAULT_API_BASE_URL = 'https://blocklist.sernate.com';
     public const UPDATE_URL = 'https://blocklist.sernate.com/sernate_firehol_blocklist_check.tar.gz';
     public const VERSION_URL = 'https://blocklist.sernate.com/version.txt';
     public const CONFIG_FILE = __DIR__ . '/../data/config.json';
     public const STATE_FILE = __DIR__ . '/../state/last_result.json';
+    public const MANUAL_STATE_FILE = __DIR__ . '/../state/manual_result.json';
+    public const IP_CACHE_FILE = __DIR__ . '/../state/ip_cache.json';
     public const DEBUG_FILE = __DIR__ . '/../state/debug.json';
     public const LOCK_FILE = __DIR__ . '/../state/check.lock';
 
@@ -183,7 +185,7 @@ final class SernateFireholBlocklistCheck
         ];
     }
 
-    public static function runCheck(?array $ips = null, ?array $config = null): array
+    public static function runCheck(?array $ips = null, ?array $config = null, string $scope = 'server'): array
     {
         $config = $config ?? self::loadConfig();
         $ips = $ips ?? self::publicIpv4Addresses();
@@ -195,10 +197,11 @@ final class SernateFireholBlocklistCheck
                 'status' => 'no_public_ips',
                 'message' => 'No public IPv4 addresses were detected on this server.',
                 'checked_at' => gmdate('c'),
+                'scope' => $scope,
                 'ips' => [],
                 'api' => null,
                 'debug' => self::runtimeDebug($config, $ips, null),
-            ]);
+            ], $scope);
         }
 
         $query = http_build_query([
@@ -216,10 +219,11 @@ final class SernateFireholBlocklistCheck
                 'status' => $status,
                 'message' => self::apiErrorMessage($response),
                 'checked_at' => gmdate('c'),
+                'scope' => $scope,
                 'ips' => $ips,
                 'api' => self::safeHttpResponse($response),
                 'debug' => self::runtimeDebug($config, $ips, $response),
-            ]);
+            ], $scope);
         }
 
         $json = json_decode((string) $response['body'], true);
@@ -229,10 +233,11 @@ final class SernateFireholBlocklistCheck
                 'status' => 'api_unavailable',
                 'message' => 'The API returned an invalid response.',
                 'checked_at' => gmdate('c'),
+                'scope' => $scope,
                 'ips' => $ips,
                 'api' => self::safeHttpResponse($response),
                 'debug' => self::runtimeDebug($config, $ips, $response),
-            ]);
+            ], $scope);
         }
 
         $status = self::classifyStatus($json, $config);
@@ -241,12 +246,13 @@ final class SernateFireholBlocklistCheck
             'status' => $status,
             'message' => self::resultMessage($status, count($ips)),
             'checked_at' => gmdate('c'),
+            'scope' => $scope,
             'ips' => $ips,
             'api' => $json,
             'debug' => self::runtimeDebug($config, $ips, ['ok' => true, 'status_code' => 200, 'error' => '']),
         ];
 
-        return self::recordResult($result);
+        return self::recordResult($result, $scope);
     }
 
     public static function loadLastResult(): ?array
@@ -257,6 +263,26 @@ final class SernateFireholBlocklistCheck
 
         $decoded = json_decode((string) file_get_contents(self::STATE_FILE), true);
         return is_array($decoded) ? $decoded : null;
+    }
+
+    public static function loadManualResult(): ?array
+    {
+        if (!is_file(self::MANUAL_STATE_FILE)) {
+            return null;
+        }
+
+        $decoded = json_decode((string) file_get_contents(self::MANUAL_STATE_FILE), true);
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    public static function loadIpCache(): array
+    {
+        if (!is_file(self::IP_CACHE_FILE)) {
+            return [];
+        }
+
+        $decoded = json_decode((string) file_get_contents(self::IP_CACHE_FILE), true);
+        return is_array($decoded) ? $decoded : [];
     }
 
     public static function recordDebug(string $action, array $extra = []): void
@@ -405,9 +431,12 @@ final class SernateFireholBlocklistCheck
             return [];
         }
 
+        $cache = self::loadIpCache();
+        $checkedAt = (string) ($result['checked_at'] ?? '');
         $rows = [];
         foreach (($result['api']['results'] ?? []) as $row) {
             if (!empty($row['ip'])) {
+                $row['last_checked_at'] = $checkedAt !== '' ? $checkedAt : (string) ($cache[(string) $row['ip']]['checked_at'] ?? '');
                 $rows[(string) $row['ip']] = $row;
             }
         }
@@ -420,7 +449,10 @@ final class SernateFireholBlocklistCheck
                     'currently_blacklisted' => false,
                     'hits' => [],
                     'hits_count' => 0,
+                    'last_checked_at' => $checkedAt !== '' ? $checkedAt : (string) ($cache[$ip]['checked_at'] ?? ''),
                 ];
+            } elseif (empty($rows[$ip]['last_checked_at'])) {
+                $rows[$ip]['last_checked_at'] = $checkedAt !== '' ? $checkedAt : (string) ($cache[$ip]['checked_at'] ?? '');
             }
         }
 
@@ -593,6 +625,16 @@ final class SernateFireholBlocklistCheck
         return filter_var($url, FILTER_VALIDATE_URL) ? $url : '';
     }
 
+    public static function humanTime(?string $value): string
+    {
+        $timestamp = strtotime((string) $value);
+        if (!$timestamp) {
+            return 'Never';
+        }
+
+        return date('Y-m-d H:i:s T', $timestamp);
+    }
+
     public static function cleanHeaderValue(string $value): string
     {
         return trim(str_replace(["\r", "\n"], '', $value));
@@ -685,11 +727,13 @@ final class SernateFireholBlocklistCheck
         file_put_contents($path, json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n", LOCK_EX);
     }
 
-    private static function recordResult(array $result): array
+    private static function recordResult(array $result, string $scope = 'server'): array
     {
         self::ensureWritableDirs();
-        self::writeJson(self::STATE_FILE, $result);
+        self::writeJson($scope === 'manual' ? self::MANUAL_STATE_FILE : self::STATE_FILE, $result);
+        self::updateIpCache($result);
         self::recordDebug('run_check', [
+            'scope' => $scope,
             'result_status' => $result['status'] ?? null,
             'result_message' => $result['message'] ?? null,
             'result_ips' => $result['ips'] ?? [],
@@ -697,6 +741,32 @@ final class SernateFireholBlocklistCheck
         ]);
 
         return $result;
+    }
+
+    private static function updateIpCache(array $result): void
+    {
+        $checkedAt = (string) ($result['checked_at'] ?? gmdate('c'));
+        $cache = self::loadIpCache();
+        $rows = [];
+
+        foreach (($result['api']['results'] ?? []) as $row) {
+            if (!empty($row['ip'])) {
+                $rows[(string) $row['ip']] = $row;
+            }
+        }
+
+        foreach (($result['ips'] ?? []) as $ip) {
+            $ip = (string) $ip;
+            $row = $rows[$ip] ?? [];
+            $cache[$ip] = [
+                'checked_at' => $checkedAt,
+                'status' => (string) ($result['status'] ?? ''),
+                'currently_blacklisted' => !empty($row['currently_blacklisted']),
+                'hits_count' => (int) ($row['hits_count'] ?? 0),
+            ];
+        }
+
+        self::writeJson(self::IP_CACHE_FILE, $cache);
     }
 
     private static function runtimeDebug(array $config, array $ips, ?array $response): array
