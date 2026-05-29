@@ -4,10 +4,9 @@ declare(strict_types=1);
 
 final class SernateFireholBlocklistCheck
 {
-    public const VERSION = '0.1.3';
+    public const VERSION = '0.1.4';
     public const PLUGIN_ID = 'sernate_firehol_blocklist_check';
     public const DEFAULT_API_BASE_URL = 'https://blocklist.sernate.com';
-    public const TEST_IP = '223.244.22.213';
     public const UPDATE_URL = 'https://blocklist.sernate.com/sernate_firehol_blocklist_check.tar.gz';
     public const VERSION_URL = 'https://blocklist.sernate.com/version.txt';
     public const CONFIG_FILE = __DIR__ . '/../data/config.json';
@@ -110,6 +109,16 @@ final class SernateFireholBlocklistCheck
     public static function normalizeInterval(int $hours): int
     {
         return in_array($hours, [4, 6, 8, 12, 24], true) ? $hours : 6;
+    }
+
+    public static function validManualIpv4(string $ip): ?string
+    {
+        $ip = trim($ip);
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            return $ip;
+        }
+
+        return null;
     }
 
     public static function ensureWritableDirs(): void

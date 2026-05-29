@@ -22,11 +22,14 @@ if ($action !== '') {
         } elseif ($action === 'check') {
             $result = SernateFireholBlocklistCheck::runCheck();
             $notice = (string) $result['message'];
-        } elseif ($action === 'check_test') {
-            $ips = SernateFireholBlocklistCheck::publicIpv4Addresses();
-            $ips[] = SernateFireholBlocklistCheck::TEST_IP;
-            $result = SernateFireholBlocklistCheck::runCheck(array_values(array_unique($ips)));
-            $notice = 'Test IP included: ' . (string) $result['message'];
+        } elseif ($action === 'check_manual') {
+            $manualIp = SernateFireholBlocklistCheck::validManualIpv4((string) ($requestData['manual_ip'] ?? ''));
+            if ($manualIp === null) {
+                throw new RuntimeException('Enter a valid IPv4 address.');
+            }
+
+            $result = SernateFireholBlocklistCheck::runCheck([$manualIp]);
+            $notice = 'Manual check for ' . $manualIp . ': ' . (string) $result['message'];
         }
     } catch (Throwable $exception) {
         $error = $exception->getMessage();
@@ -78,6 +81,7 @@ function selectedAttr($actual, $expected): string
     .sir-form-row { margin-bottom: 14px; }
     .sir-label { display: block; font-weight: 650; margin-bottom: 6px; }
     .sir-input, .sir-select { width: 100%; max-width: 520px; padding: 7px 9px; border: 1px solid #b9c3d3; border-radius: 4px; background: #fff; }
+    .sir-inline-input { max-width: 220px; }
     .sir-check { display: flex; gap: 8px; align-items: center; margin: 9px 0; }
     .sir-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
     .sir-btn { border: 0; border-radius: 4px; padding: 8px 13px; cursor: pointer; font-weight: 700; background: #31b7e9; color: #fff; }
@@ -170,9 +174,13 @@ function selectedAttr($actual, $expected): string
             <form method="get" class="sir-actions">
                 <input type="hidden" name="action" value="check">
                 <button class="sir-btn" type="submit">Run Check Now</button>
-                <button class="sir-btn secondary" name="action" value="check_test" type="submit">Run With Test IP</button>
             </form>
-            <p class="sir-small sir-help">Test mode adds <?= SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::TEST_IP) ?> to the detected server IPs so you can preview a listed result.</p>
+            <form method="get" class="sir-actions">
+                <input type="hidden" name="action" value="check_manual">
+                <input class="sir-input sir-inline-input" name="manual_ip" placeholder="IPv4 address">
+                <button class="sir-btn secondary" type="submit">Search IP</button>
+            </form>
+            <p class="sir-small sir-help">Manual search checks one IPv4 address. If it appears in multiple feeds, each matching feed is shown in the result.</p>
         </section>
 
         <section class="sir-card">
