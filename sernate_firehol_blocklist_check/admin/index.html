@@ -129,6 +129,15 @@ function selectedAttr($actual, $expected): string
     <?php if ($notice): ?><div class="sir-alert ok"><strong><?= SernateFireholBlocklistCheck::html($notice) ?></strong></div><?php endif; ?>
     <?php if ($error): ?><div class="sir-alert err"><?= SernateFireholBlocklistCheck::html($error) ?></div><?php endif; ?>
 
+    <section class="sir-card" style="margin-bottom:16px">
+        <h2>Detected Public IPv4 Addresses</h2>
+        <?php if ($detectedIps): ?>
+            <ul class="sir-list"><?php foreach ($detectedIps as $ip): ?><li><?= SernateFireholBlocklistCheck::html($ip) ?></li><?php endforeach; ?></ul>
+        <?php else: ?>
+            <p class="sir-muted">No public IPv4 addresses detected. Private and reserved addresses are ignored.</p>
+        <?php endif; ?>
+    </section>
+
     <div class="sir-grid">
         <section class="sir-card">
             <h2>Server IP Result</h2>
@@ -325,12 +334,7 @@ function selectedAttr($actual, $expected): string
     </section>
 
     <section class="sir-card" style="margin-top:16px">
-        <h2>Detected Public IPv4 Addresses</h2>
-        <?php if ($detectedIps): ?>
-            <ul class="sir-list"><?php foreach ($detectedIps as $ip): ?><li><?= SernateFireholBlocklistCheck::html($ip) ?></li><?php endforeach; ?></ul>
-        <?php else: ?>
-            <p class="sir-muted">No public IPv4 addresses detected. Private and reserved addresses are ignored.</p>
-        <?php endif; ?>
+        <h2>Source Data</h2>
         <p class="sir-small sir-muted">FireHOL and the upstream feed maintainers deserve credit for collecting, curating and maintaining the source blocklist data. Sernate provides the hosted API, indexing, history, freshness checks and this DirectAdmin plugin. Removal requests must go to the maintainer of the source list where the IP appears.</p>
     </section>
 </div>
