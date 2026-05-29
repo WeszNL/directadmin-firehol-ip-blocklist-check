@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 final class SernateFireholBlocklistCheck
 {
-    public const VERSION = '0.1.6';
+    public const VERSION = '0.1.7';
     public const PLUGIN_ID = 'sernate_firehol_blocklist_check';
     public const DEFAULT_API_BASE_URL = 'https://blocklist.sernate.com';
     public const UPDATE_URL = 'https://blocklist.sernate.com/sernate_firehol_blocklist_check.tar.gz';
