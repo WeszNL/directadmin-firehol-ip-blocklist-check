@@ -257,7 +257,7 @@ function resultTable(array $rows): string
 </style>
 
 <div class="sir-wrap">
-    <a class="sir-back" href="/CMD_PLUGIN_MANAGER">Plugin Manager</a>
+    <a class="sir-back" href="/CMD_PLUGIN_MANAGER" target="_top">Plugin Manager</a>
     <div class="sir-head">
         <div>
             <h1 class="sir-title">Sernate FireHOL Blocklist Check</h1>
@@ -396,7 +396,7 @@ function resultTable(array $rows): string
         <span>Plugin version: <strong><?= SernateFireholBlocklistCheck::html((string) $update['installed']) ?></strong></span>
         <span>Latest: <strong><?= SernateFireholBlocklistCheck::html((string) ($update['latest'] ?? 'unknown')) ?></strong></span>
         <span>Update available: <strong><?= !empty($update['update_available']) ? 'yes' : 'no' ?></strong></span>
-        <a class="sir-plugin-manager-link" href="/CMD_PLUGIN_MANAGER">Plugin Manager</a>
+        <a class="sir-plugin-manager-link" href="/CMD_PLUGIN_MANAGER" target="_top">Plugin Manager</a>
         <?php if (!empty($update['update_available'])): ?>
             <span>Update from DirectAdmin Plugin Manager.</span>
         <?php elseif (empty($update['ok'])): ?>

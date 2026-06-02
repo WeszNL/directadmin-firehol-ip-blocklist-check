@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 final class SernateFireholBlocklistCheck
 {
-    public const VERSION = '0.1.23';
+    public const VERSION = '0.1.24';
     public const PLUGIN_ID = 'sernate_firehol_blocklist_check';
     public const DEFAULT_API_BASE_URL = 'https://blocklist.sernate.com';
     public const UPDATE_URL = 'https://github.com/WeszNL/directadmin-firehol-ip-blocklist-check/releases/latest/download/sernate_firehol_blocklist_check.tar.gz';
-    public const VERSION_URL = 'https://github.com/WeszNL/directadmin-firehol-ip-blocklist-check/releases/latest/download/version.txt';
+    public const VERSION_URL = 'https://raw.githubusercontent.com/WeszNL/directadmin-firehol-ip-blocklist-check/main/version.txt';
     public const UPDATE_CACHE_TTL = 43200;
 
     public static function defaultConfig(): array

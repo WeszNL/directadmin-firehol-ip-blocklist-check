@@ -78,7 +78,7 @@ Install the downloaded package through the DirectAdmin Plugin Manager:
 2. Open **Plugin Manager**.
 3. Upload `sernate_firehol_blocklist_check.tar.gz`.
 4. Install the uploaded plugin.
-5. Open **Sernate FireHOL Blocklist Check** from the admin plugin menu.
+5. Open **Sernate FireHOL Blocklist Check** from **Extra Features**.
 
 The plugin is admin-only. Reseller and user level pages are not used for the actual feature.
 
