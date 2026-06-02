@@ -227,6 +227,7 @@ function resultTable(array $rows): string
     .sir-update strong { color: #172033; }
     .sir-update a { color: #1e3a8a; font-weight: 700; text-decoration: none; }
     .sir-update a:hover { text-decoration: underline; }
+    .sir-update .sir-plugin-manager-link { margin-left: auto; }
     .sir-footer { margin: 10px 0 0; color: #98a2b3; font-size: 12px; text-align: center; }
     .sir-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 82px; padding: 4px 10px; border-radius: 999px; font-weight: 700; font-size: 12px; white-space: nowrap; }
     .sir-pill.clean { background: #dcfce7; color: #166534; }
@@ -396,7 +397,7 @@ function resultTable(array $rows): string
         <span>Plugin version: <strong><?= SernateFireholBlocklistCheck::html((string) $update['installed']) ?></strong></span>
         <span>Latest: <strong><?= SernateFireholBlocklistCheck::html((string) ($update['latest'] ?? 'unknown')) ?></strong></span>
         <span>Update available: <strong><?= !empty($update['update_available']) ? 'yes' : 'no' ?></strong></span>
-        <a class="sir-plugin-manager-link" href="/CMD_PLUGIN_MANAGER" target="_top">Plugin Manager</a>
+        <a class="sir-plugin-manager-link" href="/CMD_PLUGIN_MANAGER" target="_top">Back to Plugin Manager</a>
         <?php if (!empty($update['update_available'])): ?>
             <span>Update from DirectAdmin Plugin Manager.</span>
         <?php elseif (empty($update['ok'])): ?>
