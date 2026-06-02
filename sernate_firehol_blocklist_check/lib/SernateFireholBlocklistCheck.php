@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 final class SernateFireholBlocklistCheck
 {
-    public const VERSION = '0.1.22';
+    public const VERSION = '0.1.23';
     public const PLUGIN_ID = 'sernate_firehol_blocklist_check';
     public const DEFAULT_API_BASE_URL = 'https://blocklist.sernate.com';
     public const UPDATE_URL = 'https://github.com/WeszNL/directadmin-firehol-ip-blocklist-check/releases/latest/download/sernate_firehol_blocklist_check.tar.gz';
@@ -1106,6 +1106,8 @@ final class SernateFireholBlocklistCheck
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_HEADER => false,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS => 5,
             CURLOPT_CONNECTTIMEOUT => 5,
             CURLOPT_TIMEOUT => 12,
             CURLOPT_SSL_VERIFYPEER => true,
@@ -1115,6 +1117,12 @@ final class SernateFireholBlocklistCheck
                 'User-Agent: Sernate-FireHOL-Blocklist-Check-DirectAdmin/' . self::VERSION,
             ],
         ]);
+        if (defined('CURLOPT_PROTOCOLS') && defined('CURLPROTO_HTTP') && defined('CURLPROTO_HTTPS')) {
+            curl_setopt($ch, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+        }
+        if (defined('CURLOPT_REDIR_PROTOCOLS') && defined('CURLPROTO_HTTP') && defined('CURLPROTO_HTTPS')) {
+            curl_setopt($ch, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+        }
 
         $responseBody = curl_exec($ch);
         $error = curl_error($ch);

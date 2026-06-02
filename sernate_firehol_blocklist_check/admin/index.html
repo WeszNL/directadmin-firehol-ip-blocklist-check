@@ -257,7 +257,7 @@ function resultTable(array $rows): string
 </style>
 
 <div class="sir-wrap">
-    <a class="sir-back" href="/CMD_PLUGIN_MANAGER" onclick="return sirBackToPluginManager();">Back</a>
+    <a class="sir-back" href="/CMD_PLUGIN_MANAGER">Plugin Manager</a>
     <div class="sir-head">
         <div>
             <h1 class="sir-title">Sernate FireHOL Blocklist Check</h1>
@@ -396,8 +396,9 @@ function resultTable(array $rows): string
         <span>Plugin version: <strong><?= SernateFireholBlocklistCheck::html((string) $update['installed']) ?></strong></span>
         <span>Latest: <strong><?= SernateFireholBlocklistCheck::html((string) ($update['latest'] ?? 'unknown')) ?></strong></span>
         <span>Update available: <strong><?= !empty($update['update_available']) ? 'yes' : 'no' ?></strong></span>
+        <a class="sir-plugin-manager-link" href="/CMD_PLUGIN_MANAGER">Plugin Manager</a>
         <?php if (!empty($update['update_available'])): ?>
-            <a class="sir-plugin-manager-link" href="/CMD_PLUGIN_MANAGER">Open DirectAdmin Plugin Manager</a>
+            <span>Update from DirectAdmin Plugin Manager.</span>
         <?php elseif (empty($update['ok'])): ?>
             <span>Could not read the version file right now.</span>
         <?php endif; ?>
@@ -440,30 +441,6 @@ function resultTable(array $rows): string
     (function () {
         var enabled = document.getElementById('schedule_enabled');
         var interval = document.getElementById('schedule_interval_hours');
-        var managerLinks = document.querySelectorAll('.sir-plugin-manager-link');
-
-        function pluginManagerUrl() {
-            if (window.location.pathname.indexOf('/evo/') === 0) {
-                return '/evo/admin/plugin-manager';
-            }
-
-            return '/CMD_PLUGIN_MANAGER';
-        }
-
-        window.sirBackToPluginManager = function () {
-            if (window.history.length > 1) {
-                window.history.back();
-                return false;
-            }
-
-            window.location.href = pluginManagerUrl();
-            return false;
-        };
-
-        for (var i = 0; i < managerLinks.length; i++) {
-            managerLinks[i].href = pluginManagerUrl();
-        }
-
         if (!enabled || !interval) {
             return;
         }
