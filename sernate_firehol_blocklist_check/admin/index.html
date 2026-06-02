@@ -258,7 +258,7 @@ function resultTable(array $rows): string
 </style>
 
 <div class="sir-wrap">
-    <a class="sir-back" href="/CMD_PLUGIN_MANAGER" target="_top">Plugin Manager</a>
+    <a class="sir-back" href="#" onclick="return sirBackButton();">Back</a>
     <div class="sir-head">
         <div>
             <h1 class="sir-title">Sernate FireHOL Blocklist Check</h1>
@@ -442,6 +442,17 @@ function resultTable(array $rows): string
     (function () {
         var enabled = document.getElementById('schedule_enabled');
         var interval = document.getElementById('schedule_interval_hours');
+
+        window.sirBackButton = function () {
+            if (window.history.length > 1) {
+                window.history.back();
+                return false;
+            }
+
+            window.location.href = '/CMD_PLUGINS_ADMIN';
+            return false;
+        };
+
         if (!enabled || !interval) {
             return;
         }
