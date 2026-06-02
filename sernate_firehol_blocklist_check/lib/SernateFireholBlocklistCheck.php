@@ -4,17 +4,12 @@ declare(strict_types=1);
 
 final class SernateFireholBlocklistCheck
 {
-    public const VERSION = '0.1.7';
+    public const VERSION = '0.1.22';
     public const PLUGIN_ID = 'sernate_firehol_blocklist_check';
     public const DEFAULT_API_BASE_URL = 'https://blocklist.sernate.com';
-    public const UPDATE_URL = 'https://blocklist.sernate.com/sernate_firehol_blocklist_check.tar.gz';
-    public const VERSION_URL = 'https://blocklist.sernate.com/version.txt';
-    public const CONFIG_FILE = __DIR__ . '/../data/config.json';
-    public const STATE_FILE = __DIR__ . '/../state/last_result.json';
-    public const MANUAL_STATE_FILE = __DIR__ . '/../state/manual_result.json';
-    public const IP_CACHE_FILE = __DIR__ . '/../state/ip_cache.json';
-    public const DEBUG_FILE = __DIR__ . '/../state/debug.json';
-    public const LOCK_FILE = __DIR__ . '/../state/check.lock';
+    public const UPDATE_URL = 'https://github.com/WeszNL/directadmin-firehol-ip-blocklist-check/releases/latest/download/sernate_firehol_blocklist_check.tar.gz';
+    public const VERSION_URL = 'https://github.com/WeszNL/directadmin-firehol-ip-blocklist-check/releases/latest/download/version.txt';
+    public const UPDATE_CACHE_TTL = 43200;
 
     public static function defaultConfig(): array
     {
@@ -29,6 +24,86 @@ final class SernateFireholBlocklistCheck
             'investigation_mode' => false,
             'last_scheduled_run_at' => null,
         ];
+    }
+
+    public static function storageDir(): string
+    {
+        $localStateDir = __DIR__ . '/../state';
+        $runtime = self::runtimeUser();
+        if ((string) ($runtime['user'] ?? '') === 'diradmin' || (string) getenv('RUNNING_AS') === 'diradmin') {
+            return $localStateDir;
+        }
+
+        $user = self::directAdminUsername();
+        $daUserDir = '/usr/local/directadmin/data/users/' . $user;
+        if ($user !== '' && is_dir($daUserDir)) {
+            return $daUserDir . '/plugins/' . self::PLUGIN_ID;
+        }
+
+        return $localStateDir;
+    }
+
+    public static function configFile(): string
+    {
+        return self::storageDir() . '/config.json';
+    }
+
+    public static function debugServerIpsFile(): string
+    {
+        return self::storageDir() . '/debug_server_ips.txt';
+    }
+
+    public static function stateFile(): string
+    {
+        return self::storageDir() . '/last_result.json';
+    }
+
+    public static function ipCacheFile(): string
+    {
+        return self::storageDir() . '/ip_cache.json';
+    }
+
+    public static function updateCacheFile(): string
+    {
+        return self::storageDir() . '/update_cache.json';
+    }
+
+    public static function debugFile(): string
+    {
+        return self::storageDir() . '/debug.json';
+    }
+
+    public static function installMarkerFile(): string
+    {
+        return self::storageDir() . '/install_marker.txt';
+    }
+
+    public static function lockFile(): string
+    {
+        return self::storageDir() . '/check.lock';
+    }
+
+    public static function directAdminUsername(): string
+    {
+        $user = (string) getenv('USERNAME');
+        if ($user !== '') {
+            return preg_replace('/[^A-Za-z0-9_.-]/', '', $user) ?? '';
+        }
+
+        $runtime = self::runtimeUser();
+        $runtimeUser = preg_replace('/[^A-Za-z0-9_.-]/', '', (string) ($runtime['user'] ?? '')) ?? '';
+        if ($runtimeUser !== '' && is_dir('/usr/local/directadmin/data/users/' . $runtimeUser)) {
+            return $runtimeUser;
+        }
+
+        if (is_readable('/usr/local/directadmin/data/admin/admin.list')) {
+            $admins = file('/usr/local/directadmin/data/admin/admin.list', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            if (is_array($admins) && !empty($admins[0])) {
+                return preg_replace('/[^A-Za-z0-9_.-]/', '', (string) $admins[0]) ?? '';
+            }
+        }
+
+        return $runtimeUser;
     }
 
     public static function loadDirectAdminRequest(): void
@@ -59,8 +134,8 @@ final class SernateFireholBlocklistCheck
     public static function loadConfig(): array
     {
         $config = self::defaultConfig();
-        if (is_file(self::CONFIG_FILE)) {
-            $raw = file_get_contents(self::CONFIG_FILE);
+        if (is_file(self::configFile())) {
+            $raw = file_get_contents(self::configFile());
             $decoded = json_decode($raw ?: '', true);
             if (is_array($decoded)) {
                 $config = array_merge($config, $decoded);
@@ -105,7 +180,7 @@ final class SernateFireholBlocklistCheck
         $config['include_stale'] = $config['investigation_mode'];
 
         self::ensureWritableDirs();
-        self::writeJson(self::CONFIG_FILE, $config);
+        self::writeJson(self::configFile(), $config);
     }
 
     public static function normalizeInterval(int $hours): int
@@ -125,7 +200,7 @@ final class SernateFireholBlocklistCheck
 
     public static function ensureWritableDirs(): void
     {
-        foreach ([dirname(self::CONFIG_FILE), dirname(self::STATE_FILE)] as $dir) {
+        foreach ([dirname(self::configFile()), dirname(self::stateFile())] as $dir) {
             if (!is_dir($dir)) {
                 mkdir($dir, 0750, true);
             }
@@ -134,7 +209,37 @@ final class SernateFireholBlocklistCheck
 
     public static function publicIpv4Addresses(): array
     {
-        return self::ipDetectionDebug()['ips'];
+        $ips = [];
+        foreach (array_merge(self::ipDetectionDebug()['ips'], self::debugServerIps()) as $ip) {
+            $ips[$ip] = true;
+        }
+
+        $ips = array_keys($ips);
+        sort($ips);
+
+        return $ips;
+    }
+
+    public static function debugServerIps(): array
+    {
+        if (!is_file(self::debugServerIpsFile())) {
+            return [];
+        }
+
+        $raw = (string) file_get_contents(self::debugServerIpsFile());
+        preg_match_all('/\b(?:\d{1,3}\.){3}\d{1,3}\b/', $raw, $matches);
+
+        $ips = [];
+        foreach (($matches[0] ?? []) as $candidate) {
+            if (filter_var($candidate, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+                $ips[$candidate] = true;
+            }
+        }
+
+        $ips = array_keys($ips);
+        sort($ips);
+
+        return $ips;
     }
 
     public static function ipDetectionDebug(): array
@@ -204,14 +309,10 @@ final class SernateFireholBlocklistCheck
             ], $scope);
         }
 
-        $query = http_build_query([
-            'current_only' => $config['current_only'] ? 'true' : 'false',
-            'include_stale' => $config['include_stale'] ? 'true' : 'false',
-        ]);
-        $url = rtrim((string) $config['api_base_url'], '/') . '/search?' . $query;
-        $body = implode(',', $ips);
+        $response = count($ips) === 1
+            ? self::searchSingleIp((string) $config['api_base_url'], $ips[0], $config)
+            : self::searchMultipleIps((string) $config['api_base_url'], $ips, $config);
 
-        $response = self::httpPost($url, $body);
         if (!$response['ok']) {
             $status = self::statusFromHttpResponse($response);
             return self::recordResult([
@@ -255,40 +356,53 @@ final class SernateFireholBlocklistCheck
         return self::recordResult($result, $scope);
     }
 
-    public static function loadLastResult(): ?array
+    public static function searchSingleIp(string $apiBaseUrl, string $ip, array $config): array
     {
-        if (!is_file(self::STATE_FILE)) {
-            return null;
-        }
+        $query = http_build_query([
+            'v' => $ip,
+            'current_only' => !empty($config['current_only']) ? 'true' : 'false',
+            'include_stale' => !empty($config['include_stale']) ? 'true' : 'false',
+        ]);
 
-        $decoded = json_decode((string) file_get_contents(self::STATE_FILE), true);
-        return is_array($decoded) ? $decoded : null;
+        return self::httpGet(rtrim($apiBaseUrl, '/') . '/search/ip?' . $query, 'application/json');
     }
 
-    public static function loadManualResult(): ?array
+    public static function searchMultipleIps(string $apiBaseUrl, array $ips, array $config): array
     {
-        if (!is_file(self::MANUAL_STATE_FILE)) {
+        $query = http_build_query([
+            'current_only' => !empty($config['current_only']) ? 'true' : 'false',
+            'include_stale' => !empty($config['include_stale']) ? 'true' : 'false',
+        ]);
+        $url = rtrim($apiBaseUrl, '/') . '/search?' . $query;
+        $body = implode(',', $ips);
+
+        return self::httpPost($url, $body);
+    }
+
+    public static function loadLastResult(): ?array
+    {
+        if (!is_file(self::stateFile())) {
             return null;
         }
 
-        $decoded = json_decode((string) file_get_contents(self::MANUAL_STATE_FILE), true);
+        $decoded = json_decode((string) file_get_contents(self::stateFile()), true);
         return is_array($decoded) ? $decoded : null;
     }
 
     public static function loadIpCache(): array
     {
-        if (!is_file(self::IP_CACHE_FILE)) {
+        if (!is_file(self::ipCacheFile())) {
             return [];
         }
 
-        $decoded = json_decode((string) file_get_contents(self::IP_CACHE_FILE), true);
+        $decoded = json_decode((string) file_get_contents(self::ipCacheFile()), true);
         return is_array($decoded) ? $decoded : [];
     }
 
     public static function recordDebug(string $action, array $extra = []): void
     {
         self::ensureWritableDirs();
-        self::writeJson(self::DEBUG_FILE, array_merge([
+        self::writeJson(self::debugFile(), array_merge([
             'action' => $action,
             'at' => gmdate('c'),
             'request_method' => (string) ($_SERVER['REQUEST_METHOD'] ?? ''),
@@ -302,12 +416,92 @@ final class SernateFireholBlocklistCheck
 
     public static function loadDebug(): ?array
     {
-        if (!is_file(self::DEBUG_FILE)) {
+        if (!is_file(self::debugFile())) {
             return null;
         }
 
-        $decoded = json_decode((string) file_get_contents(self::DEBUG_FILE), true);
+        $decoded = json_decode((string) file_get_contents(self::debugFile()), true);
         return is_array($decoded) ? $decoded : null;
+    }
+
+    public static function installHealth(): array
+    {
+        $cronFile = '/etc/cron.d/sernate-firehol-blocklist-check';
+        $scriptFile = __DIR__ . '/../scripts/check.php';
+
+        return [
+            'cron_ok' => is_file($cronFile),
+            'cron_file' => $cronFile,
+            'check_script_ok' => is_file($scriptFile),
+            'check_script' => realpath($scriptFile) ?: $scriptFile,
+            'php_version' => PHP_VERSION,
+            'php_ok' => PHP_VERSION_ID >= 70100,
+            'curl_ok' => function_exists('curl_init'),
+            'runtime_user' => self::runtimeUser(),
+            'plugin_dir' => realpath(__DIR__ . '/..') ?: (__DIR__ . '/..'),
+            'data_dir' => dirname(self::configFile()),
+            'data_dir_writable' => is_dir(dirname(self::configFile())) && is_writable(dirname(self::configFile())),
+            'state_dir' => dirname(self::stateFile()),
+            'state_dir_writable' => is_dir(dirname(self::stateFile())) && is_writable(dirname(self::stateFile())),
+            'storage_dir' => self::storageDir(),
+            'storage_user' => self::directAdminUsername(),
+            'last_result_file_exists' => is_file(self::stateFile()),
+            'debug_file_exists' => is_file(self::debugFile()),
+            'install_marker' => is_file(self::installMarkerFile()) ? trim((string) file_get_contents(self::installMarkerFile())) : '',
+            'debug_server_ips' => self::debugServerIps(),
+            'debug_server_ips_file' => self::debugServerIpsFile(),
+            'update_cache' => self::updateCacheDebug(),
+            'last_debug' => self::loadDebug(),
+        ];
+    }
+
+    public static function runtimeUser(): array
+    {
+        $uid = function_exists('posix_geteuid') ? posix_geteuid() : getmyuid();
+        $gid = function_exists('posix_getegid') ? posix_getegid() : getmygid();
+        $userInfo = function_exists('posix_getpwuid') ? posix_getpwuid((int) $uid) : false;
+        $groupInfo = function_exists('posix_getgrgid') ? posix_getgrgid((int) $gid) : false;
+
+        return [
+            'uid' => $uid,
+            'gid' => $gid,
+            'user' => is_array($userInfo) ? (string) ($userInfo['name'] ?? '') : '',
+            'group' => is_array($groupInfo) ? (string) ($groupInfo['name'] ?? '') : '',
+            'file_owner_user' => get_current_user(),
+        ];
+    }
+
+    public static function updateCacheDebug(): array
+    {
+        $path = self::updateCacheFile();
+        $dir = dirname($path);
+        $debug = [
+            'file' => $path,
+            'exists' => is_file($path),
+            'dir_writable' => is_dir($dir) && is_writable($dir),
+            'checked_at' => null,
+            'age_seconds' => null,
+            'ttl_seconds' => self::UPDATE_CACHE_TTL,
+            'latest' => null,
+            'ok' => null,
+        ];
+
+        if (!is_file($path)) {
+            return $debug;
+        }
+
+        $decoded = json_decode((string) file_get_contents($path), true);
+        if (!is_array($decoded)) {
+            return $debug;
+        }
+
+        $checkedAt = strtotime((string) ($decoded['checked_at'] ?? ''));
+        $debug['checked_at'] = (string) ($decoded['checked_at'] ?? '');
+        $debug['age_seconds'] = $checkedAt ? time() - $checkedAt : null;
+        $debug['latest'] = (string) ($decoded['status']['latest'] ?? '');
+        $debug['ok'] = isset($decoded['status']['ok']) ? (bool) $decoded['status']['ok'] : null;
+
+        return $debug;
     }
 
     public static function dueForScheduledRun(array $config): bool
@@ -329,15 +523,15 @@ final class SernateFireholBlocklistCheck
         return time() - $lastTs >= ((int) $config['schedule_interval_hours'] * 3600);
     }
 
-    public static function scheduledCheck(): array
+    public static function scheduledCheck(bool $force = false): array
     {
         $config = self::loadConfig();
-        if (!self::dueForScheduledRun($config)) {
+        if (!$force && !self::dueForScheduledRun($config)) {
             return ['ran' => false, 'message' => 'Not due.'];
         }
 
         self::ensureWritableDirs();
-        $lock = fopen(self::LOCK_FILE, 'c');
+        $lock = fopen(self::lockFile(), 'c');
         if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) {
             return ['ran' => false, 'message' => 'Another check is already running.'];
         }
@@ -345,14 +539,15 @@ final class SernateFireholBlocklistCheck
         $previous = self::loadLastResult();
         $result = self::runCheck(null, $config);
 
-        if (!empty($config['notify_on_new_listings']) && self::hasNewActiveListing($previous, $result)) {
+        $shouldNotify = !empty($config['notify_on_new_listings']) && ($force || self::hasNewActiveListing($previous, $result));
+        if ($shouldNotify) {
             self::notify($result, $config);
         }
 
         flock($lock, LOCK_UN);
         fclose($lock);
 
-        return ['ran' => true, 'result' => $result];
+        return ['ran' => true, 'forced' => $force, 'notified' => $shouldNotify, 'result' => $result];
     }
 
     public static function hasNewActiveListing(?array $previous, array $current): bool
@@ -399,8 +594,14 @@ final class SernateFireholBlocklistCheck
     public static function notifyAdmin(array $result): void
     {
         $ips = implode(', ', self::activeListedIps($result));
-        $subject = rawurlencode('Sernate FireHOL Blocklist Check: IP listed');
-        $message = rawurlencode("One or more public server IPs appear in indexed FireHOL blocklists.\n\nIPs: " . $ips . "\n\nOpen DirectAdmin > Sernate FireHOL Blocklist Check for details.");
+        $subject = rawurlencode(self::notificationSubject());
+        $message = rawurlencode(
+            "One or more IPs on this server were found on a FireHOL-based blocklist.\n\n"
+            . "Server: " . self::serverName() . "\n"
+            . "IP(s): " . $ips . "\n\n"
+            . "Open the plugin for details:\n"
+            . "/CMD_PLUGINS_ADMIN/" . self::PLUGIN_ID
+        );
         $line = "action=notify&value=admin&subject={$subject}&message={$message}\n";
         // This plugin reports listings only; it never changes firewall rules.
         @file_put_contents('/usr/local/directadmin/data/task.queue', $line, FILE_APPEND | LOCK_EX);
@@ -413,16 +614,55 @@ final class SernateFireholBlocklistCheck
         }
 
         $ips = implode(', ', self::activeListedIps($result));
-        $subject = 'Sernate FireHOL Blocklist Check: IP listed';
-        $message = "One or more public server IPs appear in indexed FireHOL blocklists.\n\nIPs: {$ips}\n\nOpen DirectAdmin > Sernate FireHOL Blocklist Check for details.";
-        $headers = [];
+        $subject = self::notificationSubject();
+        $message = "One or more IPs on this server were found on a FireHOL-based blocklist.\n\n"
+            . "Server: " . self::serverName() . "\n"
+            . "IP(s): {$ips}\n\n"
+            . "Open DirectAdmin > Sernate FireHOL Blocklist Check for details.";
+        $headers = [
+            'MIME-Version: 1.0',
+            'Content-Type: text/plain; charset=UTF-8',
+            'Content-Transfer-Encoding: 8bit',
+            'X-Mailer: Sernate FireHOL Blocklist Check DirectAdmin Plugin/' . self::VERSION,
+            'Auto-Submitted: auto-generated',
+        ];
+        $mailArgs = '';
         if ($from !== '' && filter_var($from, FILTER_VALIDATE_EMAIL)) {
             $from = self::cleanHeaderValue($from);
-            $headers[] = 'From: ' . $from;
-            $headers[] = 'Reply-To: ' . $from;
+            $headers[] = 'From: ' . self::mailboxHeader(self::mailFromName(), $from);
+            $headers[] = 'Reply-To: ' . self::mailboxHeader(self::mailFromName(), $from);
+            $mailArgs = '-f ' . escapeshellarg($from);
         }
 
-        @mail($to, $subject, $message, implode("\r\n", $headers));
+        @mail($to, $subject, $message, implode("\r\n", $headers), $mailArgs);
+    }
+
+    public static function notificationSubject(): string
+    {
+        return 'DirectAdmin ' . self::serverName() . ': server IP found on blocklist';
+    }
+
+    public static function serverName(): string
+    {
+        $name = gethostname();
+        if (is_string($name) && trim($name) !== '') {
+            return self::cleanHeaderValue($name);
+        }
+
+        return 'server';
+    }
+
+    public static function mailFromName(): string
+    {
+        return 'DirectAdmin Blocklist Check (' . self::serverName() . ')';
+    }
+
+    public static function mailboxHeader(string $name, string $email): string
+    {
+        $name = trim(str_replace(['"', "\r", "\n"], '', $name));
+        $email = self::cleanHeaderValue($email);
+
+        return '"' . addcslashes($name, '\\') . '" <' . $email . '>';
     }
 
     public static function resultRows(?array $result): array
@@ -460,6 +700,117 @@ final class SernateFireholBlocklistCheck
         return array_values($rows);
     }
 
+    public static function activeHits(array $row): array
+    {
+        $hits = [];
+        foreach (($row['hits'] ?? []) as $hit) {
+            if (!is_array($hit)) {
+                continue;
+            }
+
+            if (($hit['current_status'] ?? '') === 'present') {
+                $hits[] = $hit;
+            }
+        }
+
+        return $hits;
+    }
+
+    public static function historyHits(array $row): array
+    {
+        $hits = [];
+        foreach (($row['hits'] ?? []) as $hit) {
+            if (!is_array($hit)) {
+                continue;
+            }
+
+            if (($hit['current_status'] ?? '') === 'absent') {
+                $hits[] = $hit;
+            }
+        }
+
+        return $hits;
+    }
+
+    public static function rowStatusLabel(array $row): string
+    {
+        if (!empty($row['currently_blacklisted'])) {
+            return 'Listed';
+        }
+
+        if (self::historyHits($row) !== []) {
+            return 'History only';
+        }
+
+        return 'Clear';
+    }
+
+    public static function rowStatusClass(array $row): string
+    {
+        if (!empty($row['currently_blacklisted'])) {
+            return 'listed';
+        }
+
+        if (self::historyHits($row) !== []) {
+            return 'history';
+        }
+
+        return 'clean';
+    }
+
+    public static function rowFeedSummary(array $row): string
+    {
+        $active = count(self::activeHits($row));
+        $history = count(self::historyHits($row));
+
+        if ($active > 0) {
+            $summary = $active . ' current feed' . ($active === 1 ? '' : 's');
+            if ($history > 0) {
+                $summary .= ', ' . $history . ' historical';
+            }
+
+            return $summary;
+        }
+
+        if ($history > 0) {
+            return $history . ' historical feed' . ($history === 1 ? '' : 's');
+        }
+
+        return 'No current listing in checked FireHOL feeds.';
+    }
+
+    public static function hitDateSummary(array $hit): string
+    {
+        $added = self::humanTime((string) ($hit['last_added'] ?? $hit['first_seen'] ?? ''));
+        $removed = self::humanTime((string) ($hit['last_removed'] ?? ''));
+        $parts = [];
+
+        if ($added !== 'Never') {
+            $parts[] = 'Added ' . $added;
+        }
+
+        if ($removed !== 'Never') {
+            $parts[] = 'Removed ' . $removed;
+        }
+
+        return implode(' / ', $parts);
+    }
+
+    public static function hitEvidence(array $hit): string
+    {
+        $matchedEntry = trim((string) ($hit['matched_entry'] ?? ''));
+        if ($matchedEntry === '') {
+            return '';
+        }
+
+        $matchedIp = trim((string) ($hit['matched_ip'] ?? ''));
+        if ($matchedIp === '') {
+            return 'CIDR match - matched feed entry ' . $matchedEntry;
+        }
+
+        return 'CIDR match - ' . $matchedIp . ' falls within ' . $matchedEntry;
+    }
+
     public static function hitStatusLabel(array $hit): string
     {
         if (($hit['current_status'] ?? '') === 'present') {
@@ -475,31 +826,36 @@ final class SernateFireholBlocklistCheck
 
     public static function updateStatus(): array
     {
+        $cached = self::loadUpdateCache();
+        if ($cached !== null) {
+            return $cached;
+        }
+
         $response = self::httpGet(self::VERSION_URL);
         if (!$response['ok']) {
-            return [
+            return self::saveUpdateCache([
                 'ok' => false,
                 'installed' => self::VERSION,
                 'latest' => null,
                 'update_available' => false,
                 'message' => $response['error'] ?: 'Could not check for updates.',
-            ];
+            ]);
         }
 
         $latest = self::extractVersion((string) $response['body']);
         if ($latest === null) {
-            return [
+            return self::saveUpdateCache([
                 'ok' => false,
                 'installed' => self::VERSION,
                 'latest' => null,
                 'update_available' => false,
                 'message' => 'Update version file did not contain a version number.',
-            ];
+            ]);
         }
 
         $available = version_compare($latest, self::VERSION, '>');
 
-        return [
+        return self::saveUpdateCache([
             'ok' => true,
             'installed' => self::VERSION,
             'latest' => $latest,
@@ -507,7 +863,63 @@ final class SernateFireholBlocklistCheck
             'message' => $available ? 'A new plugin version is available.' : 'Plugin is up to date.',
             'update_url' => self::UPDATE_URL,
             'version_url' => self::VERSION_URL,
+        ]);
+    }
+
+    public static function updateStatusFromCache(): array
+    {
+        $cached = self::loadUpdateCache();
+        if ($cached !== null) {
+            return $cached;
+        }
+
+        return [
+            'ok' => true,
+            'installed' => self::VERSION,
+            'latest' => 'not checked',
+            'update_available' => false,
+            'message' => 'Update check is skipped during actions.',
+            'update_url' => self::UPDATE_URL,
+            'version_url' => self::VERSION_URL,
         ];
+    }
+
+    public static function loadUpdateCache(): ?array
+    {
+        if (!is_file(self::updateCacheFile())) {
+            return null;
+        }
+
+        $decoded = json_decode((string) file_get_contents(self::updateCacheFile()), true);
+        if (!is_array($decoded) || empty($decoded['checked_at']) || empty($decoded['status']) || !is_array($decoded['status'])) {
+            return null;
+        }
+
+        $checkedAt = strtotime((string) $decoded['checked_at']);
+        if (!$checkedAt || time() - $checkedAt > self::UPDATE_CACHE_TTL) {
+            return null;
+        }
+
+        $status = $decoded['status'];
+        $status['installed'] = self::VERSION;
+
+        return $status;
+    }
+
+    public static function saveUpdateCache(array $status): array
+    {
+        self::ensureWritableDirs();
+        $status['installed'] = self::VERSION;
+        $cache = [
+            'checked_at' => gmdate('c'),
+            'status' => $status,
+        ];
+
+        if (is_dir(dirname(self::updateCacheFile())) && is_writable(dirname(self::updateCacheFile()))) {
+            self::writeJson(self::updateCacheFile(), $cache);
+        }
+
+        return $status;
     }
 
     public static function extractVersion(string $body): ?string
@@ -680,7 +1092,7 @@ final class SernateFireholBlocklistCheck
         ];
     }
 
-    public static function httpGet(string $url): array
+    public static function httpGet(string $url, string $accept = 'text/plain'): array
     {
         if (!function_exists('curl_init')) {
             return ['ok' => false, 'error' => 'PHP cURL extension is not available.', 'status_code' => 0, 'body' => null];
@@ -699,7 +1111,7 @@ final class SernateFireholBlocklistCheck
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_SSL_VERIFYHOST => 2,
             CURLOPT_HTTPHEADER => [
-                'Accept: text/plain',
+                'Accept: ' . self::cleanHeaderValue($accept),
                 'User-Agent: Sernate-FireHOL-Blocklist-Check-DirectAdmin/' . self::VERSION,
             ],
         ]);
@@ -730,8 +1142,10 @@ final class SernateFireholBlocklistCheck
     private static function recordResult(array $result, string $scope = 'server'): array
     {
         self::ensureWritableDirs();
-        self::writeJson($scope === 'manual' ? self::MANUAL_STATE_FILE : self::STATE_FILE, $result);
-        self::updateIpCache($result);
+        if ($scope !== 'manual') {
+            self::writeJson(self::stateFile(), $result);
+            self::updateIpCache($result);
+        }
         self::recordDebug('run_check', [
             'scope' => $scope,
             'result_status' => $result['status'] ?? null,
@@ -766,7 +1180,7 @@ final class SernateFireholBlocklistCheck
             ];
         }
 
-        self::writeJson(self::IP_CACHE_FILE, $cache);
+        self::writeJson(self::ipCacheFile(), $cache);
     }
 
     private static function runtimeDebug(array $config, array $ips, ?array $response): array

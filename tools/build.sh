@@ -7,11 +7,15 @@ DIST_DIR="$ROOT_DIR/dist"
 VERSION="$(awk -F= '$1=="version"{print $2}' "$PLUGIN_DIR/plugin.conf")"
 
 mkdir -p "$DIST_DIR"
+mkdir -p "$PLUGIN_DIR/data" "$PLUGIN_DIR/state"
 find "$PLUGIN_DIR/admin" "$PLUGIN_DIR/reseller" "$PLUGIN_DIR/user" "$PLUGIN_DIR/scripts" -type f -exec chmod 755 {} \;
 
 cd "$ROOT_DIR"
-tar -C "$PLUGIN_DIR" -czf "$DIST_DIR/sernate_firehol_blocklist_check.tar.gz" .
+tar --owner=diradmin --group=diradmin -C "$PLUGIN_DIR" -czf "$DIST_DIR/sernate_firehol_blocklist_check.tar.gz" .
 cp "$DIST_DIR/sernate_firehol_blocklist_check.tar.gz" "$DIST_DIR/sernate_firehol_blocklist_check-$VERSION.tar.gz"
+printf '%s\n' "$VERSION" > "$DIST_DIR/version.txt"
+(cd "$DIST_DIR" && sha256sum sernate_firehol_blocklist_check.tar.gz > sernate_firehol_blocklist_check.tar.gz.sha256)
+(cd "$DIST_DIR" && sha256sum "sernate_firehol_blocklist_check-$VERSION.tar.gz" > "sernate_firehol_blocklist_check-$VERSION.tar.gz.sha256")
 if command -v zip >/dev/null 2>&1; then
   rm -f "$DIST_DIR/sernate_firehol_blocklist_check-$VERSION.zip"
   (cd "$PLUGIN_DIR" && zip -qr "$DIST_DIR/sernate_firehol_blocklist_check-$VERSION.zip" .)

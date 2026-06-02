@@ -1,87 +1,95 @@
 # Sernate FireHOL Blocklist Check
 
-DirectAdmin plugin that checks whether this server's public IPv4 addresses appear in FireHOL IP blocklists, using the Sernate Blocklist API.
+DirectAdmin admin plugin for checking whether a server's public IPv4 addresses appear in FireHOL-based blocklists indexed by the Sernate Blocklist API.
 
-The plugin is meant to answer one practical question inside DirectAdmin: is one of this server's public IPs listed in any of the FireHOL-based blocklists we index?
+The plugin is meant to answer a simple operational question inside DirectAdmin:
 
-It can help with email delivery issues, blocked outbound connections, abuse investigation and general server hygiene. It is not a firewall tool and it does not try to make reputation claims by itself.
+**Are any public IP addresses on this server currently listed in indexed FireHOL-based blocklists?**
 
-## Credit
+It can help when checking server IP reputation, looking into abuse reports, reviewing suspicious IPs from access logs, or troubleshooting possible issues with mail delivery or blocked outbound connections.
 
-FireHOL and the upstream feed maintainers deserve credit for collecting, curating and maintaining the source blocklist data. The Sernate Blocklist API indexes and aggregates FireHOL IP blocklist data, then adds search, history, freshness detection and this DirectAdmin plugin on top.
+The manual search is useful when you see an IP repeatedly attacking or probing a server. You can look it up to see if it appears in any indexed FireHOL-based feeds. If only certain feeds list the IP, that may help decide which source lists are worth monitoring or adding to firewall tools such as ConfigServer Firewall.
 
-## Features
+## Why Use This DirectAdmin Plugin Beside CSF RBL Checks?
+
+CSF's RBL check is mainly useful for mail blacklist checks and email delivery issues.
+
+This DirectAdmin plugin checks FireHOL-based IP blocklists, which cover broader security signals such as scanners, abuse, malware, botnets and attack sources.
+
+It does not replace CSF and does not change firewall rules. It gives extra visibility.
+
+## What It Does
 
 - Detects public IPv4 addresses on the DirectAdmin server.
-- Checks whether those IPs appear in FireHOL-based blocklists.
-- Shows current fresh listings by default.
-- Optional investigation mode includes historical removed listings and stale upstream feed sources.
+- Checks those IPs against FireHOL-based blocklist data indexed by Sernate.
+- Shows whether each IP is clear, currently listed, or only present in historical results.
+- Shows affected feeds, feed maintainers, source links, categories and timestamps where available.
+- Includes optional manual IP search.
 - Supports automatic checks every 4, 6, 8, 12 or 24 hours.
-- Uses DirectAdmin admin notifications when new active listings are found.
-- Does not modify firewall rules and does not block traffic.
+- Can notify the DirectAdmin admin or a custom email address when new active listings are found.
+
+## What It Does Not Do
+
+- It does not block or unblock IP addresses.
+- It does not modify CSF, firewalld, iptables, nftables or other firewall rules.
+- It does not modify DirectAdmin settings.
+- It does not contact feed maintainers or request removals.
+- It does not guarantee email deliverability.
+- It does not directly monitor Gmail, Microsoft or mailbox-provider reputation systems.
+
+The plugin is read-only. It provides visibility and investigation context.
+
+## Understanding Blocklist Results
+
+A listing in one or more FireHOL-based blocklists does not automatically mean that a server is compromised, abusive or experiencing service issues.
+
+FireHOL aggregates many different threat intelligence sources, each with its own methodology, confidence level, scope and purpose. Some feeds are selective and list confirmed malicious activity, while others include broader categories such as scanners, proxies, VPNs, cloud infrastructure, previously reported hosts or historical observations.
+
+As a result:
+
+- Not all blocklists carry the same weight or reputation.
+- Different providers and services use different threat intelligence sources.
+- A listing does not necessarily mean a service will block your IP.
+- A listing only matters operationally when a service, provider or administrator actually uses that specific feed or a related source.
+- An IP may appear in one feed while remaining fully functional for email, APIs and other services.
+- Some listings may be informational rather than immediately actionable.
+
+The purpose of this plugin is to show where server IP addresses appear within indexed threat intelligence feeds. Treat results as an indicator for further investigation, not as a final verdict on reputation, trustworthiness or service availability.
+
+When a listing is detected, review the affected feed, maintainer, category and source before deciding what action is needed.
+
+## Download
+
+Download the latest plugin package:
+
+https://github.com/WeszNL/directadmin-firehol-ip-blocklist-check/releases/latest
+
+Use this file from the latest release:
+
+```text
+sernate_firehol_blocklist_check.tar.gz
+```
 
 ## Install
 
-Build the package:
+Install the downloaded package through the DirectAdmin Plugin Manager:
 
-```sh
-./tools/build.sh
-```
-
-Upload `dist/sernate_firehol_blocklist_check.tar.gz` in DirectAdmin:
-
-1. Log in as admin.
-2. Open Plugin Manager.
-3. Add/upload the tar.gz package.
-4. Select install after upload.
+1. Log in to DirectAdmin as an admin user.
+2. Open **Plugin Manager**.
+3. Upload `sernate_firehol_blocklist_check.tar.gz`.
+4. Install the uploaded plugin.
 5. Open **Sernate FireHOL Blocklist Check** from the admin plugin menu.
 
-DirectAdmin plugin packages use a `plugin.conf` file and executable user level entry points. This package includes the expected `admin`, `reseller`, `user`, `hooks`, `images` and `scripts` directories.
+The plugin is admin-only. Reseller and user level pages are not used for the actual feature.
 
-## Updates
+## Privacy & Security
 
-DirectAdmin supports plugin updates through `update_url` and `version_url` in `plugin.conf`.
+The plugin sends only the selected IPv4 address(es) to the Sernate blocklist lookup API. It does not send DirectAdmin login details, usernames, domains, email addresses, server configuration, logs, files or customer data.
 
-This build checks:
+Like any tool that uses an external API, there is some trust involved if that source is unavailable or returns unexpected data. API responses are treated as untrusted text: returned values are escaped or validated before display and are never used to run server commands.
 
-```ini
-update_url=https://blocklist.sernate.com/sernate_firehol_blocklist_check.tar.gz
-version_url=https://blocklist.sernate.com/version.txt
-```
+## Source Data
 
-The admin plugin page also shows the installed version, latest version and whether an update is available.
+[FireHOL](http://iplists.firehol.org/) and the upstream feed maintainers deserve credit for collecting, curating and maintaining the source blocklist data.
 
-`version.txt` should contain a plain semantic version such as `0.1.1`.
-
-## Uninstall
-
-Uninstall from DirectAdmin Plugin Manager. The uninstall script removes the plugin cron file and any leftover lock file. It does not remove saved check history before DirectAdmin removes the plugin directory.
-
-## API
-
-- Base URL: https://blocklist.sernate.com
-- Health check: https://blocklist.sernate.com/health
-- API documentation: https://blocklist.sernate.com/docs
-- OpenAPI schema: https://blocklist.sernate.com/openapi.json
-
-The plugin uses `POST /search` with comma-separated IPv4 addresses. Public search defaults to current hits from fresh feeds only. Historical and stale-feed results are opt-in.
-
-## Status Definitions
-
-- **Clean:** No public server IPs were found in current indexed security blocklists.
-- **Listed:** One or more public server IPs are currently present in indexed security feeds.
-- **History Only:** The IP was previously listed in one or more feeds, but is no longer currently present.
-- **Stale Source:** The upstream source feed is older than the configured freshness threshold.
-- **API Unavailable:** The Sernate Blocklist API is temporarily unavailable or overloaded. The previous successful result may still be shown in the plugin.
-
-## What This Plugin Does Not Do
-
-- It does not automatically block IP addresses.
-- It does not modify CSF or firewall rules.
-- It does not replace traditional mail blacklist monitoring systems.
-- It does not directly monitor Gmail, Microsoft or mailbox-provider deliverability systems.
-- It does not guarantee email deliverability.
-- It does not decide whether an IP is "bad"; it shows where the IP appears in the indexed lists.
-- It does not manage or remove listings from external blocklists.
-
-If removal is required, contact the relevant upstream feed maintainer or provider.
+Sernate provides the hosted API, indexing, history, freshness checks and this DirectAdmin plugin. Removal requests must go to the maintainer of the source list where the IP appears.

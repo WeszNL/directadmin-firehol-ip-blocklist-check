@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Sernate FireHOL Blocklist Check">
-  <rect width="64" height="64" rx="8" fill="#163b74"/>
-  <path d="M32 8 52 17v14c0 12.2-7.8 20.8-20 25-12.2-4.2-20-12.8-20-25V17l20-9Z" fill="#ffffff"/>
-  <path d="M22 33h20M22 25h20M22 41h12" stroke="#163b74" stroke-width="5" stroke-linecap="round"/>
-</svg>
-

@@ -8,9 +8,13 @@ require_once __DIR__ . '/../lib/SernateFireholBlocklistCheck.php';
 SernateFireholBlocklistCheck::loadDirectAdminRequest();
 
 $notice = null;
+$noticeStatus = null;
 $error = null;
+$pageResult = null;
+$pageResultScope = null;
 $requestData = array_merge($_GET, $_POST);
 $action = (string) ($requestData['action'] ?? '');
+$showDebug = (string) ($requestData['debug'] ?? '') === '1';
 
 if ($action !== '') {
     try {
@@ -21,7 +25,10 @@ if ($action !== '') {
             $notice = 'Settings saved.';
         } elseif ($action === 'check') {
             $result = SernateFireholBlocklistCheck::runCheck();
+            $pageResult = $result;
+            $pageResultScope = 'server';
             $notice = (string) $result['message'];
+            $noticeStatus = (string) ($result['status'] ?? '');
         } elseif ($action === 'check_manual') {
             $manualIp = SernateFireholBlocklistCheck::validManualIpv4((string) ($requestData['manual_ip'] ?? ''));
             if ($manualIp === null) {
@@ -29,7 +36,10 @@ if ($action !== '') {
             }
 
             $result = SernateFireholBlocklistCheck::runCheck([$manualIp], null, 'manual');
-            $notice = 'Manual check for ' . $manualIp . ': ' . (string) $result['message'];
+            $pageResult = $result;
+            $pageResultScope = 'manual';
+            $notice = 'Manual check completed for ' . $manualIp . '.';
+            $noticeStatus = (string) ($result['status'] ?? '');
         }
     } catch (Throwable $exception) {
         $error = $exception->getMessage();
@@ -41,10 +51,11 @@ if ($action !== '') {
 }
 
 $config = SernateFireholBlocklistCheck::loadConfig();
-$last = SernateFireholBlocklistCheck::loadLastResult();
-$manualLast = SernateFireholBlocklistCheck::loadManualResult();
+$last = $pageResultScope === 'server' && is_array($pageResult) ? $pageResult : SernateFireholBlocklistCheck::loadLastResult();
+$manualLast = $pageResultScope === 'manual' && is_array($pageResult) ? $pageResult : null;
 $detectedIps = SernateFireholBlocklistCheck::publicIpv4Addresses();
-$update = SernateFireholBlocklistCheck::updateStatus();
+$update = $action === '' ? SernateFireholBlocklistCheck::updateStatus() : SernateFireholBlocklistCheck::updateStatusFromCache();
+$installHealth = SernateFireholBlocklistCheck::installHealth();
 $headerStatus = $last ? (string) $last['status'] : 'not_checked';
 $resultRows = SernateFireholBlocklistCheck::resultRows($last);
 $manualRows = SernateFireholBlocklistCheck::resultRows($manualLast);
@@ -59,67 +70,199 @@ function selectedAttr($actual, $expected): string
     return (string) $actual === (string) $expected ? ' selected' : '';
 }
 
+function resultIntro(?array $result, string $cleanText, string $listedText): string
+{
+    if (!$result) {
+        return '<p class="sir-muted">No check has been run yet.</p>';
+    }
+
+    $status = (string) ($result['status'] ?? '');
+    if ($status === 'clean') {
+        return '<div class="sir-alert sir-result-clean"><strong>Clear:</strong> ' . SernateFireholBlocklistCheck::html($cleanText) . '</div>';
+    }
+
+    if ($status === 'listed') {
+        return '<div class="sir-alert sir-result-listed"><strong>Listed:</strong> ' . SernateFireholBlocklistCheck::html($listedText) . '</div>';
+    }
+
+    if ($status === 'history_only') {
+        return '<div class="sir-alert sir-result-warning"><strong>History only:</strong> this IP was listed before, but is not currently present in fresh FireHOL feeds.</div>';
+    }
+
+    if ($status === 'rate_limited') {
+        return '<div class="sir-alert sir-result-warning"><strong>Rate limited:</strong> the API returned HTTP 429. Please wait and try again later.</div>';
+    }
+
+    return '<div class="sir-alert sir-result-neutral">' . SernateFireholBlocklistCheck::html((string) ($result['message'] ?? 'Result available.')) . '</div>';
+}
+
+function feedList(array $row): string
+{
+    $hits = $row['hits'] ?? [];
+    if (!is_array($hits) || $hits === []) {
+        return '<span class="sir-muted">No current listing in checked FireHOL feeds.</span>';
+    }
+
+    $html = '<details class="sir-feed-details"><summary>' . SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::rowFeedSummary($row)) . '</summary>';
+    foreach ($hits as $hit) {
+        if (!is_array($hit)) {
+            continue;
+        }
+
+        $hitStatus = (string) ($hit['current_status'] ?? '');
+        $maintainerUrl = SernateFireholBlocklistCheck::safeUrl((string) ($hit['maintainer_url'] ?? ''));
+        $sourceUrl = SernateFireholBlocklistCheck::safeUrl((string) ($hit['list_source_url'] ?? ''));
+        $dateSummary = SernateFireholBlocklistCheck::hitDateSummary($hit);
+        $evidence = SernateFireholBlocklistCheck::hitEvidence($hit);
+
+        $html .= '<div class="sir-feed sir-small">';
+        $html .= '<div class="sir-feed-head">';
+        $html .= '<span class="sir-feed-name">' . SernateFireholBlocklistCheck::html((string) ($hit['feed_name'] ?? 'Unknown feed')) . '</span>';
+        if (!empty($hit['category'])) {
+            $html .= '<span class="sir-category">' . SernateFireholBlocklistCheck::html((string) $hit['category']) . '</span>';
+        }
+        if ($hitStatus === 'present') {
+            $html .= '<span class="sir-pill listed">Currently listed</span>';
+        } elseif ($hitStatus === 'absent') {
+            $html .= '<span class="sir-pill history">History only</span>';
+        }
+        if (!empty($hit['source_is_stale'])) {
+            $html .= '<span class="sir-pill history">Stale source</span>';
+        }
+        $html .= '</div>';
+
+        if (!empty($hit['maintainer'])) {
+            $html .= '<div>Maintainer: <span class="sir-maintainer">' . SernateFireholBlocklistCheck::html((string) $hit['maintainer']) . '</span></div>';
+        }
+        if ($dateSummary !== '') {
+            $html .= '<div class="sir-muted">' . SernateFireholBlocklistCheck::html($dateSummary) . '</div>';
+        }
+        if ($evidence !== '') {
+            $html .= '<div class="sir-evidence">Evidence: ' . SernateFireholBlocklistCheck::html($evidence) . '</div>';
+        }
+        if ($maintainerUrl !== '' || $sourceUrl !== '') {
+            $html .= '<div class="sir-feed-links">';
+            if ($maintainerUrl !== '') {
+                $html .= '<a class="sir-link-chip" href="' . SernateFireholBlocklistCheck::html($maintainerUrl) . '" target="_blank" rel="noopener noreferrer">Maintainer</a>';
+            }
+            if ($sourceUrl !== '') {
+                $html .= '<a class="sir-link-chip" href="' . SernateFireholBlocklistCheck::html($sourceUrl) . '" target="_blank" rel="noopener noreferrer">Source</a>';
+            }
+            $html .= '</div>';
+        }
+
+        $html .= '</div>';
+    }
+    $html .= '</details>';
+
+    return $html;
+}
+
+function resultTable(array $rows): string
+{
+    if ($rows === []) {
+        return '';
+    }
+
+    $html = '<table class="sir-table"><thead><tr><th>IP</th><th>Status</th><th>Last Checked</th><th>Feeds</th></tr></thead><tbody>';
+    foreach ($rows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+
+        $html .= '<tr>';
+        $html .= '<td class="sir-ip">' . SernateFireholBlocklistCheck::html((string) ($row['ip'] ?? '')) . '</td>';
+        $html .= '<td><span class="sir-pill ' . SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::rowStatusClass($row)) . '">' . SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::rowStatusLabel($row)) . '</span></td>';
+        $html .= '<td>' . SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::humanTime((string) ($row['last_checked_at'] ?? ''))) . '</td>';
+        $html .= '<td>' . feedList($row) . '</td>';
+        $html .= '</tr>';
+    }
+    $html .= '</tbody></table>';
+
+    return $html;
+}
+
 ?>
 <style>
-    .sir-wrap { color: #1f2937; font-family: Roboto, "Open Sans", Arial, Helvetica, sans-serif; font-size: 14px; max-width: 1280px; margin: 0 auto; padding: 14px 16px 0; }
+    .sir-wrap { color: #1f2937; font-family: Roboto, "Open Sans", Arial, Helvetica, sans-serif; font-size: 14px; max-width: 1280px; margin: 0 auto; padding: 24px 16px 0; }
     .sir-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin: 0 0 14px; }
     .sir-title { margin: 0; font-size: 20px; line-height: 1.25; font-weight: 700; }
-    .sir-subtitle { margin: 6px 0 0; color: #667085; max-width: 820px; line-height: 1.45; }
-    .sir-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 0.8fr); gap: 14px; align-items: start; }
+    .sir-back { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 12px; padding: 6px 10px; border-radius: 4px; background: #eef2ff; color: #1e3a8a; text-decoration: none; font-weight: 700; font-size: 13px; }
+    .sir-back:hover { background: #dbeafe; text-decoration: none; }
+    .sir-subtitle { margin: 6px 0 0; color: #667085; max-width: 860px; line-height: 1.45; }
+    .sir-disclaimer { display: inline-block; max-width: 760px; margin-top: 6px; color: #7a8599; font-size: 12px; line-height: 1.35; }
+    .sir-top-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr); gap: 14px; align-items: start; }
     .sir-card { border: 1px solid #d7dde8; border-radius: 4px; padding: 14px; background: transparent; }
     .sir-card h2 { margin: 0 0 12px; font-size: 15px; font-weight: 700; color: #111827; }
-    .sir-status { display: inline-flex; align-items: center; justify-content: center; min-height: 34px; min-width: 128px; padding: 0 14px; border-radius: 999px; font-weight: 700; white-space: nowrap; }
+    .sir-status { display: inline-flex; align-items: center; justify-content: center; min-height: 34px; min-width: 150px; padding: 0 14px; border-radius: 999px; font-weight: 700; white-space: nowrap; }
     .sir-status.clean { background: #dcfce7; color: #166534; }
     .sir-status.listed { background: #fee2e2; color: #991b1b; }
-    .sir-status.history_only, .sir-status.stale_source { background: #fef3c7; color: #92400e; }
+    .sir-status.history_only, .sir-status.stale_source, .sir-status.rate_limited { background: #fef3c7; color: #92400e; }
     .sir-status.api_error, .sir-status.api_unavailable, .sir-status.no_public_ips, .sir-status.not_checked { background: #e5e7eb; color: #374151; }
-    .sir-status.rate_limited { background: #fef3c7; color: #92400e; }
     .sir-alert { padding: 12px 14px; border-radius: 8px; margin: 0 0 14px; }
     .sir-alert.ok { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
     .sir-alert.err { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
     .sir-result-clean { background: #ecfdf5; border: 1px solid #86efac; color: #14532d; }
     .sir-result-listed { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+    .sir-result-warning { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
     .sir-result-neutral { background: #f8fafc; border: 1px solid #d7dde8; color: #334155; }
-    .sir-form-row { margin-bottom: 14px; }
+    .sir-form-row { margin-bottom: 12px; }
     .sir-label { display: block; font-weight: 650; margin-bottom: 6px; }
     .sir-input, .sir-select { width: 100%; max-width: 520px; padding: 7px 9px; border: 1px solid #b9c3d3; border-radius: 4px; background: #fff; }
     .sir-inline-input { max-width: 220px; }
     .sir-check { display: flex; gap: 8px; align-items: center; margin: 9px 0; }
-    .sir-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+    .sir-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
     .sir-btn { border: 0; border-radius: 4px; padding: 8px 13px; cursor: pointer; font-weight: 700; background: #31b7e9; color: #fff; }
     .sir-btn.secondary { background: #eef2ff; color: #1e3a8a; }
-    .sir-table { width: 100%; border-collapse: collapse; }
+    .sir-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
     .sir-table th, .sir-table td { border-bottom: 1px solid #e5eaf2; padding: 10px 8px; text-align: left; vertical-align: top; }
-    .sir-table th:nth-child(2), .sir-table td:nth-child(2) { width: 96px; }
+    .sir-table th:nth-child(1), .sir-table td:nth-child(1) { width: 150px; }
+    .sir-table th:nth-child(2), .sir-table td:nth-child(2) { width: 110px; }
+    .sir-table th:nth-child(3), .sir-table td:nth-child(3) { width: 190px; }
+    .sir-ip { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .sir-muted { color: #667085; }
     .sir-small { font-size: 13px; line-height: 1.45; }
     .sir-list { margin: 8px 0 0 18px; padding: 0; }
-    .sir-update { display: grid; gap: 6px; }
+    .sir-update { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; color: #667085; border-top: 1px solid #e5eaf2; margin-top: 16px; padding-top: 10px; }
     .sir-update strong { color: #172033; }
-    .sir-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 74px; padding: 3px 9px; border-radius: 999px; font-weight: 700; font-size: 12px; white-space: nowrap; }
+    .sir-update a { color: #1e3a8a; font-weight: 700; text-decoration: none; }
+    .sir-update a:hover { text-decoration: underline; }
+    .sir-footer { margin: 10px 0 0; color: #98a2b3; font-size: 12px; text-align: center; }
+    .sir-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 82px; padding: 4px 10px; border-radius: 999px; font-weight: 700; font-size: 12px; white-space: nowrap; }
     .sir-pill.clean { background: #dcfce7; color: #166534; }
     .sir-pill.listed { background: #fee2e2; color: #991b1b; }
     .sir-pill.history { background: #fef3c7; color: #92400e; }
-    .sir-feed { padding: 6px 0; border-bottom: 1px dashed #e5eaf2; }
+    .sir-feed-details summary { cursor: pointer; font-weight: 650; color: #334155; }
+    .sir-feed { padding: 8px 0; border-bottom: 1px dashed #e5eaf2; }
     .sir-feed:last-child { border-bottom: 0; }
-    .sir-feed-head { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-bottom: 2px; }
+    .sir-feed-head { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-bottom: 3px; }
     .sir-feed-name { font-weight: 700; color: #111827; }
-    .sir-maintainer { color: #334155; font-weight: 650; }
-    .sir-feed-links { display: inline-flex; flex-wrap: wrap; gap: 5px; }
-    .sir-icon-link { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px; border-radius: 4px; background: #eef2ff; color: #1e3a8a; text-decoration: none; font-weight: 700; line-height: 1; }
-    .sir-icon-link:hover { background: #dbeafe; text-decoration: none; }
+    .sir-category { display: inline-flex; align-items: center; min-height: 20px; padding: 0 7px; border-radius: 999px; background: #eef2ff; color: #334155; font-size: 12px; font-weight: 700; }
+    .sir-maintainer { color: #111827; font-weight: 700; }
+    .sir-evidence { margin-top: 3px; color: #374151; }
+    .sir-feed-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
+    .sir-link-chip { display: inline-flex; align-items: center; min-height: 22px; padding: 0 8px; border-radius: 4px; background: #eef2ff; color: #1e3a8a; text-decoration: none; font-weight: 700; font-size: 12px; }
+    .sir-link-chip:hover { background: #dbeafe; text-decoration: none; }
     .sir-help { color: #667085; margin-top: 5px; }
     .sir-select:disabled { background: #f3f4f6; color: #9ca3af; cursor: not-allowed; }
-    @media (max-width: 860px) { .sir-grid, .sir-head { display: block; } .sir-card { margin-bottom: 16px; } }
-    @media (min-width: 861px) { .sir-grid .sir-card { min-height: 0; } }
+    .sir-settings summary { cursor: pointer; font-size: 15px; font-weight: 700; color: #111827; }
+    .sir-settings[open] summary { margin-bottom: 12px; }
+    .sir-settings-body { padding-top: 4px; }
+    .sir-settings-compact { min-height: 0; }
+    .sir-settings-compact:not([open]) { padding-bottom: 13px; }
+    .sir-disclosure summary { cursor: pointer; font-size: 15px; font-weight: 700; color: #4b5563; }
+    .sir-disclosure[open] summary { margin-bottom: 12px; }
+    .sir-disclosure p { margin: 10px 0 0; }
+    @media (max-width: 900px) { .sir-top-grid, .sir-head { display: block; } .sir-card { margin-bottom: 16px; } .sir-status { margin-top: 12px; } .sir-table { table-layout: auto; } }
 </style>
 
 <div class="sir-wrap">
+    <a class="sir-back" href="/CMD_PLUGIN_MANAGER" onclick="return sirBackToPluginManager();">Back</a>
     <div class="sir-head">
         <div>
             <h1 class="sir-title">Sernate FireHOL Blocklist Check</h1>
-            <p class="sir-subtitle">Check whether this server's public IPv4 addresses appear in FireHOL IP blocklists indexed through the Sernate Blocklist API.</p>
-            <p class="sir-small sir-help">Sernate indexes IPs collected from multiple external blocklist sources. We do not maintain those source lists and cannot remove IPs from them. If a removal is needed, contact the maintainer shown for the relevant feed.</p>
+            <p class="sir-subtitle">Checks the public IPv4 addresses detected on this DirectAdmin server against FireHOL-based blocklists indexed through the Sernate Blocklist API.</p>
+            <div class="sir-disclaimer">Disclaimer: This check uses FireHOL-aggregated IP blocklist data indexed by Sernate. We do not maintain source lists or remove IPs from them. For removals, contact the feed maintainer.</div>
         </div>
         <div>
             <span class="sir-status <?= SernateFireholBlocklistCheck::html($headerStatus) ?>">
@@ -128,226 +271,199 @@ function selectedAttr($actual, $expected): string
         </div>
     </div>
 
-    <?php if ($notice): ?><div class="sir-alert ok"><strong><?= SernateFireholBlocklistCheck::html($notice) ?></strong></div><?php endif; ?>
+    <?php if ($notice && !in_array($noticeStatus, ['clean', 'listed'], true)): ?>
+        <?php $noticeClass = $noticeStatus === 'listed' ? 'sir-result-listed' : ($noticeStatus === 'clean' ? 'sir-result-clean' : 'ok'); ?>
+        <div class="sir-alert <?= SernateFireholBlocklistCheck::html($noticeClass) ?>"><strong><?= SernateFireholBlocklistCheck::html($notice) ?></strong></div>
+    <?php endif; ?>
     <?php if ($error): ?><div class="sir-alert err"><?= SernateFireholBlocklistCheck::html($error) ?></div><?php endif; ?>
+    <?php if (empty($installHealth['check_script_ok']) || empty($installHealth['cron_ok']) || empty($installHealth['php_ok'])): ?>
+        <div class="sir-alert sir-result-warning">
+            <strong>Install check:</strong>
+            <?php if (empty($installHealth['php_ok'])): ?>PHP <?= SernateFireholBlocklistCheck::html((string) $installHealth['php_version']) ?> is too old; PHP 7.1 or newer is required. <?php endif; ?>
+            <?php if (empty($installHealth['check_script_ok'])): ?>Scheduled check script is missing: <?= SernateFireholBlocklistCheck::html((string) $installHealth['check_script']) ?>. <?php endif; ?>
+            <?php if (empty($installHealth['cron_ok'])): ?>Automatic scheduler is not installed: <?= SernateFireholBlocklistCheck::html((string) $installHealth['cron_file']) ?>. <?php endif; ?>
+        </div>
+    <?php endif; ?>
+    <?php if (empty($installHealth['state_dir_writable']) || empty($installHealth['data_dir_writable']) || empty($installHealth['curl_ok'])): ?>
+        <div class="sir-alert sir-result-warning">
+            <strong>Runtime check:</strong>
+            <?php if (empty($installHealth['curl_ok'])): ?>PHP cURL is not available. <?php endif; ?>
+            <?php if (empty($installHealth['data_dir_writable'])): ?>Data directory is not writable: <?= SernateFireholBlocklistCheck::html((string) $installHealth['data_dir']) ?>. <?php endif; ?>
+            <?php if (empty($installHealth['state_dir_writable'])): ?>State directory is not writable: <?= SernateFireholBlocklistCheck::html((string) $installHealth['state_dir']) ?>. <?php endif; ?>
+        </div>
+    <?php endif; ?>
+    <?php if (!empty($installHealth['debug_server_ips'])): ?>
+        <div class="sir-alert sir-result-warning">
+            <strong>Debug server IPs active:</strong>
+            <?= SernateFireholBlocklistCheck::html(implode(', ', (array) $installHealth['debug_server_ips'])) ?>.
+            Remove <?= SernateFireholBlocklistCheck::html((string) $installHealth['debug_server_ips_file']) ?> when testing is done.
+        </div>
+    <?php endif; ?>
 
-    <section class="sir-card" style="margin-bottom:16px">
-        <h2>Detected Public IPv4 Addresses</h2>
-        <?php if ($detectedIps): ?>
-            <ul class="sir-list"><?php foreach ($detectedIps as $ip): ?><li><?= SernateFireholBlocklistCheck::html($ip) ?></li><?php endforeach; ?></ul>
-        <?php else: ?>
-            <p class="sir-muted">No public IPv4 addresses detected. Private and reserved addresses are ignored.</p>
-        <?php endif; ?>
-    </section>
-
-    <div class="sir-grid">
+    <div class="sir-top-grid">
         <section class="sir-card">
-            <h2>Server IP Result</h2>
+            <h2>Server IP Status</h2>
+            <?php if ($detectedIps): ?>
+                <p class="sir-muted">Retrieved public IPv4 address<?= count($detectedIps) === 1 ? '' : 'es' ?> from this server:</p>
+                <ul class="sir-list"><?php foreach ($detectedIps as $ip): ?><li class="sir-ip"><?= SernateFireholBlocklistCheck::html($ip) ?></li><?php endforeach; ?></ul>
+            <?php else: ?>
+                <p class="sir-muted">No public IPv4 addresses were retrieved from this server. Private and reserved addresses are ignored.</p>
+            <?php endif; ?>
             <?php if ($last): ?>
                 <p class="sir-muted">Last checked: <?= SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::humanTime((string) $last['checked_at'])) ?></p>
-                <?php if (($last['status'] ?? '') === 'clean'): ?>
-                    <div class="sir-alert sir-result-clean"><strong>Clean:</strong> none of the checked IP addresses were found in current fresh FireHOL blocklists.</div>
-                <?php elseif (($last['status'] ?? '') === 'listed'): ?>
-                    <div class="sir-alert sir-result-listed"><strong>Listed:</strong> one or more checked IP addresses appear in indexed FireHOL blocklists.</div>
-                <?php elseif (($last['status'] ?? '') === 'rate_limited'): ?>
-                    <div class="sir-alert sir-result-neutral"><strong>Rate limited:</strong> the API returned HTTP 429. Please wait and try again later.</div>
-                <?php else: ?>
-                    <div class="sir-alert sir-result-neutral"><?= SernateFireholBlocklistCheck::html((string) ($last['message'] ?? 'Result available.')) ?></div>
-                <?php endif; ?>
-                <table class="sir-table">
-                    <thead><tr><th>IP</th><th>Status</th><th>Last Checked</th><th>Feeds</th></tr></thead>
-                    <tbody>
-                    <?php foreach ($resultRows as $row): ?>
-                        <tr>
-                            <td><?= SernateFireholBlocklistCheck::html((string) ($row['ip'] ?? '')) ?></td>
-                            <td>
-                                <?php if (!empty($row['currently_blacklisted'])): ?>
-                                    <span class="sir-pill listed">Listed</span>
-                                <?php else: ?>
-                                    <span class="sir-pill clean">Not found</span>
-                                <?php endif; ?>
-                            </td>
-                            <td><?= SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::humanTime((string) ($row['last_checked_at'] ?? ''))) ?></td>
-                            <td>
-                                <?php if (empty($row['hits'])): ?>
-                                    <span class="sir-muted">No current listing in checked FireHOL feeds.</span>
-                                <?php endif; ?>
-                                <?php foreach (($row['hits'] ?? []) as $hit): ?>
-                                    <?php $hitStatus = (string) ($hit['current_status'] ?? ''); ?>
-                                    <?php $maintainerUrl = SernateFireholBlocklistCheck::safeUrl((string) ($hit['maintainer_url'] ?? '')); ?>
-                                    <?php $sourceUrl = SernateFireholBlocklistCheck::safeUrl((string) ($hit['list_source_url'] ?? '')); ?>
-                                    <div class="sir-feed sir-small">
-                                        <div class="sir-feed-head">
-                                            <span class="sir-feed-name"><?= SernateFireholBlocklistCheck::html((string) ($hit['feed_name'] ?? 'Unknown feed')) ?></span>
-                                            <?php if ($hitStatus === 'present'): ?>
-                                                <span class="sir-pill listed">Currently listed</span>
-                                            <?php elseif ($hitStatus === 'absent'): ?>
-                                                <span class="sir-pill history">Historical only</span>
-                                            <?php endif; ?>
-                                            <?php if (!empty($hit['source_is_stale'])): ?><span class="sir-pill history">Stale source</span><?php endif; ?>
-                                        </div>
-                                        <div>
-                                            <?php if (!empty($hit['maintainer'])): ?>Maintainer: <span class="sir-maintainer"><?= SernateFireholBlocklistCheck::html((string) $hit['maintainer']) ?></span><?php endif; ?>
-                                            <?php if ($maintainerUrl !== '' || $sourceUrl !== ''): ?>
-                                                <span class="sir-feed-links">
-                                                    <?php if ($maintainerUrl !== ''): ?><a class="sir-icon-link" href="<?= SernateFireholBlocklistCheck::html($maintainerUrl) ?>" target="_blank" rel="noopener noreferrer" title="Maintainer website" aria-label="Maintainer website">M</a><?php endif; ?>
-                                                    <?php if ($sourceUrl !== ''): ?><a class="sir-icon-link" href="<?= SernateFireholBlocklistCheck::html($sourceUrl) ?>" target="_blank" rel="noopener noreferrer" title="Source list" aria-label="Source list">S</a><?php endif; ?>
-                                                </span>
-                                            <?php endif; ?>
-                                        </div>
-                                    </div>
-                                <?php endforeach; ?>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                    </tbody>
-                </table>
-            <?php else: ?>
-                <p class="sir-muted">No check has been run yet.</p>
             <?php endif; ?>
-
+            <?= resultIntro($last, 'none of this server\'s public IP addresses were found in current fresh FireHOL blocklists.', 'one or more server IP addresses appear in indexed FireHOL blocklists.') ?>
+            <?= resultTable($resultRows) ?>
             <form method="get" class="sir-actions">
                 <input type="hidden" name="action" value="check">
+                <?php if ($showDebug): ?><input type="hidden" name="debug" value="1"><?php endif; ?>
                 <button class="sir-btn" type="submit">Run Check Now</button>
             </form>
-            <form method="get" class="sir-actions">
-                <input type="hidden" name="action" value="check_manual">
-                <input class="sir-input sir-inline-input" name="manual_ip" placeholder="IPv4 address">
-                <button class="sir-btn secondary" type="submit">Search IP</button>
-            </form>
-            <p class="sir-small sir-help">Manual search checks only the typed IPv4 address. It does not recheck or replace the server IP result above.</p>
         </section>
 
-        <section class="sir-card">
-            <h2>Settings</h2>
-            <form method="get">
-                <input type="hidden" name="action" value="save">
-                <div class="sir-form-row">
-                    <span class="sir-label">API</span>
-                    <div><?= SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::DEFAULT_API_BASE_URL) ?></div>
-                    <div class="sir-small sir-help">This plugin always uses the Sernate Blocklist API.</div>
-                </div>
-                <div class="sir-form-row">
-                    <label class="sir-check"><input id="schedule_enabled" type="checkbox" name="schedule_enabled" value="1"<?= checkedAttr((bool) $config['schedule_enabled']) ?>> Enable automatic checks</label>
-                    <label class="sir-label" for="schedule_interval_hours">Check interval</label>
-                    <select class="sir-select" id="schedule_interval_hours" name="schedule_interval_hours"<?= empty($config['schedule_enabled']) ? ' disabled' : '' ?>>
-                        <?php foreach ([4, 6, 8, 12, 24] as $hours): ?>
-                            <option value="<?= $hours ?>"<?= selectedAttr((int) $config['schedule_interval_hours'], $hours) ?>>Every <?= $hours ?> hours</option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <label class="sir-check"><input type="checkbox" name="notify_on_new_listings" value="1"<?= checkedAttr((bool) $config['notify_on_new_listings']) ?>> Notify DirectAdmin admin when new active listings are found</label>
-                <div class="sir-form-row">
-                    <label class="sir-label" for="notification_method">Notification method</label>
-                    <select class="sir-select" id="notification_method" name="notification_method">
-                        <option value="directadmin"<?= selectedAttr((string) $config['notification_method'], 'directadmin') ?>>DirectAdmin system message</option>
-                        <option value="email"<?= selectedAttr((string) $config['notification_method'], 'email') ?>>Custom email only</option>
-                        <option value="both"<?= selectedAttr((string) $config['notification_method'], 'both') ?>>DirectAdmin message and custom email</option>
-                    </select>
-                </div>
-                <div class="sir-form-row">
-                    <label class="sir-label" for="notification_email">Custom email address</label>
-                    <input class="sir-input" id="notification_email" name="notification_email" value="<?= SernateFireholBlocklistCheck::html((string) $config['notification_email']) ?>">
-                </div>
-                <div class="sir-form-row">
-                    <label class="sir-label" for="notification_from">From address for custom email</label>
-                    <input class="sir-input" id="notification_from" name="notification_from" value="<?= SernateFireholBlocklistCheck::html((string) $config['notification_from']) ?>">
-                    <div class="sir-small sir-help">Leave empty to use the server mail default. A custom From header is only used when it is a valid email address.</div>
-                </div>
-                <label class="sir-check"><input type="checkbox" name="investigation_mode" value="1"<?= checkedAttr((bool) $config['investigation_mode']) ?>> Investigation mode: include historical removed listings and stale sources</label>
-                <div class="sir-small sir-help">Default mode shows only current fresh listings. Investigation mode also shows IPs that were listed before but are no longer currently present.</div>
-                <div class="sir-actions">
-                    <button class="sir-btn secondary" type="submit">Save Settings</button>
-                </div>
-            </form>
-        </section>
+        <details class="sir-card sir-settings sir-settings-compact">
+            <summary>Settings</summary>
+            <div class="sir-settings-body">
+                <form method="get">
+                    <input type="hidden" name="action" value="save">
+                    <?php if ($showDebug): ?><input type="hidden" name="debug" value="1"><?php endif; ?>
+                    <div class="sir-form-row">
+                        <label class="sir-check"><input id="schedule_enabled" type="checkbox" name="schedule_enabled" value="1"<?= checkedAttr((bool) $config['schedule_enabled']) ?>> Enable automatic checks</label>
+                        <label class="sir-label" for="schedule_interval_hours">Check interval</label>
+                        <select class="sir-select" id="schedule_interval_hours" name="schedule_interval_hours"<?= empty($config['schedule_enabled']) ? ' disabled' : '' ?>>
+                            <?php foreach ([4, 6, 8, 12, 24] as $hours): ?>
+                                <option value="<?= $hours ?>"<?= selectedAttr((int) $config['schedule_interval_hours'], $hours) ?>>Every <?= $hours ?> hours</option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <label class="sir-check"><input type="checkbox" name="notify_on_new_listings" value="1"<?= checkedAttr((bool) $config['notify_on_new_listings']) ?>> Notify when new active listings are found</label>
+                    <div class="sir-form-row">
+                        <label class="sir-label" for="notification_method">Notification method</label>
+                        <select class="sir-select" id="notification_method" name="notification_method">
+                            <option value="directadmin"<?= selectedAttr((string) $config['notification_method'], 'directadmin') ?>>DirectAdmin system message</option>
+                            <option value="email"<?= selectedAttr((string) $config['notification_method'], 'email') ?>>Custom email only</option>
+                            <option value="both"<?= selectedAttr((string) $config['notification_method'], 'both') ?>>DirectAdmin message and custom email</option>
+                        </select>
+                    </div>
+                    <div class="sir-form-row">
+                        <label class="sir-label" for="notification_email">Custom email address</label>
+                        <input class="sir-input" id="notification_email" name="notification_email" value="<?= SernateFireholBlocklistCheck::html((string) $config['notification_email']) ?>">
+                    </div>
+                    <div class="sir-form-row">
+                        <label class="sir-label" for="notification_from">From address for custom email</label>
+                        <input class="sir-input" id="notification_from" name="notification_from" value="<?= SernateFireholBlocklistCheck::html((string) $config['notification_from']) ?>">
+                        <div class="sir-small sir-help">Leave empty to use the server mail default. A custom From header is only used when it is a valid email address.</div>
+                    </div>
+                    <label class="sir-check"><input type="checkbox" name="investigation_mode" value="1"<?= checkedAttr((bool) $config['investigation_mode']) ?>> Investigation mode: include historical removed listings and stale sources</label>
+                    <div class="sir-small sir-help">History only means the IP was seen before, but is no longer currently present in the feed. It is shown only in investigation mode.</div>
+                    <div class="sir-actions">
+                        <button class="sir-btn secondary" type="submit">Save Settings</button>
+                    </div>
+                </form>
+            </div>
+        </details>
     </div>
+
+    <section class="sir-card" style="margin-top:16px">
+        <h2>Manual IP Search</h2>
+        <form method="get" class="sir-actions">
+            <input type="hidden" name="action" value="check_manual">
+            <?php if ($showDebug): ?><input type="hidden" name="debug" value="1"><?php endif; ?>
+            <input class="sir-input sir-inline-input" name="manual_ip" placeholder="Search IPv4">
+            <button class="sir-btn secondary" type="submit">Search IP</button>
+        </form>
+        <p class="sir-small sir-help">Manually search an IPv4 address across the aggregated FireHOL-based blocklists.</p>
+    </section>
 
     <?php if ($manualLast): ?>
         <section class="sir-card" style="margin-top:16px">
             <h2>Manual Search Result</h2>
             <p class="sir-muted">Last checked: <?= SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::humanTime((string) $manualLast['checked_at'])) ?></p>
-            <?php if (($manualLast['status'] ?? '') === 'clean'): ?>
-                <div class="sir-alert sir-result-clean"><strong>Clean:</strong> this IP was not found in current fresh FireHOL blocklists.</div>
-            <?php elseif (($manualLast['status'] ?? '') === 'listed'): ?>
-                <div class="sir-alert sir-result-listed"><strong>Listed:</strong> this IP appears in one or more indexed FireHOL blocklists.</div>
-            <?php else: ?>
-                <div class="sir-alert sir-result-neutral"><?= SernateFireholBlocklistCheck::html((string) ($manualLast['message'] ?? 'Result available.')) ?></div>
-            <?php endif; ?>
-            <table class="sir-table">
-                <thead><tr><th>IP</th><th>Status</th><th>Last Checked</th><th>Feeds</th></tr></thead>
-                <tbody>
-                <?php foreach ($manualRows as $row): ?>
-                    <tr>
-                        <td><?= SernateFireholBlocklistCheck::html((string) ($row['ip'] ?? '')) ?></td>
-                        <td>
-                            <?php if (!empty($row['currently_blacklisted'])): ?>
-                                <span class="sir-pill listed">Listed</span>
-                            <?php else: ?>
-                                <span class="sir-pill clean">Not found</span>
-                            <?php endif; ?>
-                        </td>
-                        <td><?= SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::humanTime((string) ($row['last_checked_at'] ?? ''))) ?></td>
-                        <td>
-                            <?php if (empty($row['hits'])): ?>
-                                <span class="sir-muted">No current listing in checked FireHOL feeds.</span>
-                            <?php endif; ?>
-                            <?php foreach (($row['hits'] ?? []) as $hit): ?>
-                                <?php $hitStatus = (string) ($hit['current_status'] ?? ''); ?>
-                                <?php $maintainerUrl = SernateFireholBlocklistCheck::safeUrl((string) ($hit['maintainer_url'] ?? '')); ?>
-                                <?php $sourceUrl = SernateFireholBlocklistCheck::safeUrl((string) ($hit['list_source_url'] ?? '')); ?>
-                                <div class="sir-feed sir-small">
-                                    <div class="sir-feed-head">
-                                        <span class="sir-feed-name"><?= SernateFireholBlocklistCheck::html((string) ($hit['feed_name'] ?? 'Unknown feed')) ?></span>
-                                        <?php if ($hitStatus === 'present'): ?>
-                                            <span class="sir-pill listed">Currently listed</span>
-                                        <?php elseif ($hitStatus === 'absent'): ?>
-                                            <span class="sir-pill history">Historical only</span>
-                                        <?php endif; ?>
-                                        <?php if (!empty($hit['source_is_stale'])): ?><span class="sir-pill history">Stale source</span><?php endif; ?>
-                                    </div>
-                                    <div>
-                                        <?php if (!empty($hit['maintainer'])): ?>Maintainer: <span class="sir-maintainer"><?= SernateFireholBlocklistCheck::html((string) $hit['maintainer']) ?></span><?php endif; ?>
-                                        <?php if ($maintainerUrl !== '' || $sourceUrl !== ''): ?>
-                                            <span class="sir-feed-links">
-                                                <?php if ($maintainerUrl !== ''): ?><a class="sir-icon-link" href="<?= SernateFireholBlocklistCheck::html($maintainerUrl) ?>" target="_blank" rel="noopener noreferrer" title="Maintainer website" aria-label="Maintainer website">M</a><?php endif; ?>
-                                                <?php if ($sourceUrl !== ''): ?><a class="sir-icon-link" href="<?= SernateFireholBlocklistCheck::html($sourceUrl) ?>" target="_blank" rel="noopener noreferrer" title="Source list" aria-label="Source list">S</a><?php endif; ?>
-                                            </span>
-                                        <?php endif; ?>
-                                    </div>
-                                </div>
-                            <?php endforeach; ?>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
+            <?= resultIntro($manualLast, 'this IP was not found in current fresh FireHOL blocklists.', 'this IP appears in one or more indexed FireHOL blocklists.') ?>
+            <?= resultTable($manualRows) ?>
         </section>
     <?php endif; ?>
 
-    <section class="sir-card" style="margin-top:16px">
-        <h2>Updates</h2>
-        <div class="sir-update sir-small">
-            <div>Installed version: <strong><?= SernateFireholBlocklistCheck::html((string) $update['installed']) ?></strong></div>
-            <div>Latest version: <strong><?= SernateFireholBlocklistCheck::html((string) ($update['latest'] ?? 'unknown')) ?></strong></div>
-            <div><?= SernateFireholBlocklistCheck::html((string) $update['message']) ?></div>
-            <?php if (!empty($update['update_available'])): ?>
-                <div class="sir-alert ok" style="margin:8px 0 0">Update from DirectAdmin Plugin Manager, or install the latest package from <?= SernateFireholBlocklistCheck::html((string) $update['update_url']) ?>.</div>
-            <?php elseif (empty($update['ok'])): ?>
-                <div class="sir-alert err" style="margin:8px 0 0">Could not read <?= SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::VERSION_URL) ?> right now.</div>
-            <?php endif; ?>
-        </div>
-    </section>
+    <details class="sir-card sir-disclosure" style="margin-top:16px">
+        <summary>Privacy, Security & Source Data</summary>
+        <p class="sir-small sir-muted">This tool only sends the selected IP address(es) to the Sernate blocklist lookup API to check whether they appear in known blocklist feeds. No DirectAdmin login details, usernames, domains, email addresses, server configuration, logs, files, or customer data are sent.</p>
+        <p class="sir-small sir-muted">Like any tool that uses an external API, there is some trust involved if that source is unavailable or returns unexpected data. For that reason, API responses are treated as untrusted text: returned values are escaped or validated before display and are never used to run server commands.</p>
+        <p class="sir-small sir-muted">The lookup is read-only. It does not change firewall rules, unblock or block IPs, modify DirectAdmin settings, or contact any listed feed maintainers.</p>
+        <p class="sir-small sir-muted"><a href="http://iplists.firehol.org/" target="_blank" rel="noopener noreferrer">FireHOL</a> and the upstream feed maintainers deserve credit for collecting, curating and maintaining the source blocklist data. Sernate provides the hosted API, indexing, history, freshness checks and this DirectAdmin plugin. Removal requests must go to the maintainer of the source list where the IP appears.</p>
+    </details>
 
-    <section class="sir-card" style="margin-top:16px">
-        <h2>Source Data</h2>
-        <p class="sir-small sir-muted">FireHOL and the upstream feed maintainers deserve credit for collecting, curating and maintaining the source blocklist data. Sernate provides the hosted API, indexing, history, freshness checks and this DirectAdmin plugin. Removal requests must go to the maintainer of the source list where the IP appears.</p>
-    </section>
+    <div class="sir-update sir-small">
+        <span>Plugin version: <strong><?= SernateFireholBlocklistCheck::html((string) $update['installed']) ?></strong></span>
+        <span>Latest: <strong><?= SernateFireholBlocklistCheck::html((string) ($update['latest'] ?? 'unknown')) ?></strong></span>
+        <span>Update available: <strong><?= !empty($update['update_available']) ? 'yes' : 'no' ?></strong></span>
+        <?php if (!empty($update['update_available'])): ?>
+            <a class="sir-plugin-manager-link" href="/CMD_PLUGIN_MANAGER">Open DirectAdmin Plugin Manager</a>
+        <?php elseif (empty($update['ok'])): ?>
+            <span>Could not read the version file right now.</span>
+        <?php endif; ?>
+    </div>
+    <?php if ($showDebug): ?>
+    <details class="sir-disclosure sir-small" style="margin-top:8px">
+        <summary>Debug</summary>
+        <?php $updateCache = (array) ($installHealth['update_cache'] ?? []); ?>
+        <p class="sir-muted">Current action: <?= SernateFireholBlocklistCheck::html($action !== '' ? $action : 'none') ?> / notice status: <?= SernateFireholBlocklistCheck::html((string) ($noticeStatus ?? 'none')) ?></p>
+        <?php if (is_array($pageResult)): ?>
+            <p class="sir-muted">Current action result: <?= SernateFireholBlocklistCheck::html((string) ($pageResult['status'] ?? 'unknown')) ?> / message: <?= SernateFireholBlocklistCheck::html((string) ($pageResult['message'] ?? '')) ?></p>
+            <p class="sir-muted">Checked IPs: <?= SernateFireholBlocklistCheck::html(implode(', ', (array) ($pageResult['ips'] ?? []))) ?></p>
+        <?php endif; ?>
+        <p class="sir-muted">PHP: <?= SernateFireholBlocklistCheck::html((string) $installHealth['php_version']) ?> / cURL: <?= !empty($installHealth['curl_ok']) ? 'yes' : 'no' ?></p>
+        <?php $runtimeUser = is_array($installHealth['runtime_user'] ?? null) ? $installHealth['runtime_user'] : []; ?>
+        <p class="sir-muted">Runtime user: <?= SernateFireholBlocklistCheck::html((string) ($runtimeUser['user'] ?? '')) ?>(<?= SernateFireholBlocklistCheck::html((string) ($runtimeUser['uid'] ?? '')) ?>) / group: <?= SernateFireholBlocklistCheck::html((string) ($runtimeUser['group'] ?? '')) ?>(<?= SernateFireholBlocklistCheck::html((string) ($runtimeUser['gid'] ?? '')) ?>)</p>
+        <p class="sir-muted">Data dir writable: <?= !empty($installHealth['data_dir_writable']) ? 'yes' : 'no' ?> / State dir writable: <?= !empty($installHealth['state_dir_writable']) ? 'yes' : 'no' ?></p>
+        <p class="sir-muted">Install/update marker: <?= SernateFireholBlocklistCheck::html((string) ($installHealth['install_marker'] ?: 'not found')) ?></p>
+        <p class="sir-muted">Last result file: <?= !empty($installHealth['last_result_file_exists']) ? 'yes' : 'no' ?> / Debug file: <?= !empty($installHealth['debug_file_exists']) ? 'yes' : 'no' ?></p>
+        <?php $lastDebug = is_array($installHealth['last_debug'] ?? null) ? $installHealth['last_debug'] : []; ?>
+        <?php if ($lastDebug): ?>
+            <p class="sir-muted">Last debug action: <?= SernateFireholBlocklistCheck::html((string) ($lastDebug['action'] ?? '')) ?> at <?= SernateFireholBlocklistCheck::html((string) ($lastDebug['at'] ?? '')) ?></p>
+            <p class="sir-muted">DirectAdmin request: query=<?= SernateFireholBlocklistCheck::html((string) ($lastDebug['env_query_string'] ?? '')) ?> / post=<?= SernateFireholBlocklistCheck::html((string) ($lastDebug['env_post'] ?? '')) ?></p>
+            <?php if (!empty($lastDebug['runtime']) && is_array($lastDebug['runtime'])): ?>
+                <p class="sir-muted">Last API HTTP status: <?= SernateFireholBlocklistCheck::html((string) ($lastDebug['runtime']['http_status'] ?? 'n/a')) ?> / error: <?= SernateFireholBlocklistCheck::html((string) ($lastDebug['runtime']['http_error'] ?? '')) ?></p>
+            <?php endif; ?>
+        <?php else: ?>
+            <p class="sir-muted">No saved debug file yet. If state is not writable, debug can only be shown for the current request.</p>
+        <?php endif; ?>
+        <p class="sir-muted">Version URL: <?= SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::VERSION_URL) ?></p>
+        <p class="sir-muted">Cache file: <?= SernateFireholBlocklistCheck::html((string) ($updateCache['file'] ?? '')) ?></p>
+        <p class="sir-muted">Cache exists: <?= !empty($updateCache['exists']) ? 'yes' : 'no' ?> / writable directory: <?= !empty($updateCache['dir_writable']) ? 'yes' : 'no' ?></p>
+        <p class="sir-muted">Cache checked at: <?= SernateFireholBlocklistCheck::html((string) ($updateCache['checked_at'] ?: 'never')) ?> / age: <?= SernateFireholBlocklistCheck::html((string) ($updateCache['age_seconds'] ?? 'n/a')) ?> seconds / ttl: <?= SernateFireholBlocklistCheck::html((string) ($updateCache['ttl_seconds'] ?? '')) ?> seconds</p>
+        <p class="sir-muted">Current page update message: <?= SernateFireholBlocklistCheck::html((string) ($update['message'] ?? '')) ?></p>
+    </details>
+    <?php endif; ?>
+    <div class="sir-footer">&copy; <?= date('Y') ?> sernate.com - Wesley van Rossum</div>
 </div>
 <script>
     (function () {
         var enabled = document.getElementById('schedule_enabled');
         var interval = document.getElementById('schedule_interval_hours');
+        var managerLinks = document.querySelectorAll('.sir-plugin-manager-link');
+
+        function pluginManagerUrl() {
+            if (window.location.pathname.indexOf('/evo/') === 0) {
+                return '/evo/admin/plugin-manager';
+            }
+
+            return '/CMD_PLUGIN_MANAGER';
+        }
+
+        window.sirBackToPluginManager = function () {
+            if (window.history.length > 1) {
+                window.history.back();
+                return false;
+            }
+
+            window.location.href = pluginManagerUrl();
+            return false;
+        };
+
+        for (var i = 0; i < managerLinks.length; i++) {
+            managerLinks[i].href = pluginManagerUrl();
+        }
+
         if (!enabled || !interval) {
             return;
         }

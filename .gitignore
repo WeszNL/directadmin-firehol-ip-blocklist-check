@@ -1,6 +1,6 @@
 dist/
-.agents/
-.codex/
+.local-notes/
+.DS_Store
 sernate_firehol_blocklist_check/data/*.json
 sernate_firehol_blocklist_check/state/*.json
 sernate_firehol_blocklist_check/state/*.lock
