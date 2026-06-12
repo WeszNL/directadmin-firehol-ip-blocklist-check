@@ -262,7 +262,7 @@ function resultTable(array $rows): string
     <div class="sir-head">
         <div>
             <h1 class="sir-title">Sernate FireHOL Blocklist Check</h1>
-            <p class="sir-subtitle">Checks the public IPv4 addresses detected on this DirectAdmin server against FireHOL-based blocklists indexed through the Sernate Blocklist API.</p>
+            <p class="sir-subtitle">Checks if the public IPv4 addresses on this DirectAdmin server appear in FireHOL-based blocklists.</p>
             <div class="sir-disclaimer">Disclaimer: This check uses FireHOL-aggregated IP blocklist data indexed by Sernate. We do not maintain source lists or remove IPs from them. For removals, contact the feed maintainer.</div>
         </div>
         <div>
@@ -332,7 +332,7 @@ function resultTable(array $rows): string
                         <label class="sir-check"><input id="schedule_enabled" type="checkbox" name="schedule_enabled" value="1"<?= checkedAttr((bool) $config['schedule_enabled']) ?>> Enable automatic checks</label>
                         <label class="sir-label" for="schedule_interval_hours">Check interval</label>
                         <select class="sir-select" id="schedule_interval_hours" name="schedule_interval_hours"<?= empty($config['schedule_enabled']) ? ' disabled' : '' ?>>
-                            <?php foreach ([4, 6, 8, 12, 24] as $hours): ?>
+                            <?php foreach ([8, 12, 24] as $hours): ?>
                                 <option value="<?= $hours ?>"<?= selectedAttr((int) $config['schedule_interval_hours'], $hours) ?>>Every <?= $hours ?> hours</option>
                             <?php endforeach; ?>
                         </select>

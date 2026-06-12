@@ -25,7 +25,7 @@ It does not replace CSF and does not change firewall rules. It gives extra visib
 - Shows whether each IP is clear, currently listed, or only present in historical results.
 - Shows affected feeds, feed maintainers, source links, categories and timestamps where available.
 - Includes optional manual IP search.
-- Supports automatic checks every 4, 6, 8, 12 or 24 hours.
+- Supports automatic checks every 8, 12 or 24 hours.
 - Can notify the DirectAdmin admin or a custom email address when new active listings are found.
 
 ## What It Does Not Do
@@ -57,6 +57,13 @@ As a result:
 The purpose of this plugin is to show where server IP addresses appear within indexed threat intelligence feeds. Treat results as an indicator for further investigation, not as a final verdict on reputation, trustworthiness or service availability.
 
 When a listing is detected, review the affected feed, maintainer, category and source before deciding what action is needed.
+
+## Screenshots
+
+|  |  |
+| --- | --- |
+| **Server IP status**<br>![Server IP status](docs/screenshots/screenshot_1.png) | **Settings**<br>![Settings](docs/screenshots/screenshot_2.png) |
+| **Clean overview**<br>![Clean overview](docs/screenshots/screenshot_3.png) | **Manual search result**<br>![Manual search result](docs/screenshots/screenshot_4.png) |
 
 ## Download
 

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 final class SernateFireholBlocklistCheck
 {
-    public const VERSION = '0.1.26';
+    public const VERSION = '1.0.0';
     public const PLUGIN_ID = 'sernate_firehol_blocklist_check';
     public const DEFAULT_API_BASE_URL = 'https://blocklist.sernate.com';
     public const UPDATE_URL = 'https://github.com/WeszNL/directadmin-firehol-ip-blocklist-check/releases/latest/download/sernate_firehol_blocklist_check.tar.gz';
@@ -16,7 +16,7 @@ final class SernateFireholBlocklistCheck
         return [
             'api_base_url' => self::DEFAULT_API_BASE_URL,
             'schedule_enabled' => false,
-            'schedule_interval_hours' => 6,
+            'schedule_interval_hours' => 8,
             'notify_on_new_listings' => true,
             'notification_method' => 'directadmin',
             'notification_email' => '',
@@ -164,7 +164,7 @@ final class SernateFireholBlocklistCheck
         $config = self::loadConfig();
         $config['api_base_url'] = self::DEFAULT_API_BASE_URL;
         $config['schedule_enabled'] = !empty($input['schedule_enabled']);
-        $config['schedule_interval_hours'] = self::normalizeInterval((int) ($input['schedule_interval_hours'] ?? 6));
+        $config['schedule_interval_hours'] = self::normalizeInterval((int) ($input['schedule_interval_hours'] ?? 8));
         $config['notify_on_new_listings'] = !empty($input['notify_on_new_listings']);
         $config['notification_method'] = in_array(($input['notification_method'] ?? ''), ['directadmin', 'email', 'both'], true)
             ? (string) $input['notification_method']
@@ -185,7 +185,7 @@ final class SernateFireholBlocklistCheck
 
     public static function normalizeInterval(int $hours): int
     {
-        return in_array($hours, [4, 6, 8, 12, 24], true) ? $hours : 6;
+        return in_array($hours, [8, 12, 24], true) ? $hours : 8;
     }
 
     public static function validManualIpv4(string $ip): ?string
@@ -902,6 +902,17 @@ final class SernateFireholBlocklistCheck
 
         $status = $decoded['status'];
         $status['installed'] = self::VERSION;
+        $status['update_url'] = self::UPDATE_URL;
+        $status['version_url'] = self::VERSION_URL;
+
+        $latest = self::extractVersion((string) ($status['latest'] ?? ''));
+        if ($latest !== null) {
+            $status['latest'] = $latest;
+            $status['update_available'] = version_compare($latest, self::VERSION, '>');
+            $status['message'] = $status['update_available']
+                ? 'A new plugin version is available.'
+                : 'Plugin is up to date.';
+        }
 
         return $status;
     }
