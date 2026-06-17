@@ -91,7 +91,9 @@ The plugin is admin-only. Reseller and user level pages are not used for the act
 
 ## Privacy & Security
 
-The plugin sends only the selected IPv4 address(es) to the Sernate blocklist lookup API. It does not send DirectAdmin login details, usernames, domains, email addresses, server configuration, logs, files or customer data.
+The plugin sends only the selected IPv4 address(es) to the Sernate blocklist lookup API at https://blocklist.sernate.com. API documentation is available at https://blocklist.sernate.com/docs.
+
+It does not send DirectAdmin login details, usernames, domains, email addresses, server configuration, logs, files or customer data.
 
 Like any tool that uses an external API, there is some trust involved if that source is unavailable or returns unexpected data. API responses are treated as untrusted text: returned values are escaped or validated before display and are never used to run server commands.
 

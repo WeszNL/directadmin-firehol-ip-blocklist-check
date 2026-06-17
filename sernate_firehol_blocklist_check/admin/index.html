@@ -90,7 +90,11 @@ function resultIntro(?array $result, string $cleanText, string $listedText): str
     }
 
     if ($status === 'rate_limited') {
-        return '<div class="sir-alert sir-result-warning"><strong>Rate limited:</strong> the API returned HTTP 429. Please wait and try again later.</div>';
+        return '<div class="sir-alert sir-result-warning"><strong>Rate limited:</strong> the API is busy or received too many requests. Please wait and try again later.</div>';
+    }
+
+    if ($status === 'api_unavailable') {
+        return '<div class="sir-alert sir-result-warning"><strong>API unavailable:</strong> ' . SernateFireholBlocklistCheck::html((string) ($result['message'] ?? 'The Sernate Blocklist API could not be reached right now.')) . '</div>';
     }
 
     return '<div class="sir-alert sir-result-neutral">' . SernateFireholBlocklistCheck::html((string) ($result['message'] ?? 'Result available.')) . '</div>';
@@ -313,7 +317,7 @@ function resultTable(array $rows): string
             <?php if ($last): ?>
                 <p class="sir-muted">Last checked: <?= SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::humanTime((string) $last['checked_at'])) ?></p>
             <?php endif; ?>
-            <?= resultIntro($last, 'none of this server\'s public IP addresses were found in current fresh FireHOL blocklists.', 'one or more server IP addresses appear in indexed FireHOL blocklists.') ?>
+            <?= resultIntro($last, 'no checked server IP is currently listed in fresh FireHOL blocklists.', 'one or more server IP addresses appear in indexed FireHOL blocklists.') ?>
             <?= resultTable($resultRows) ?>
             <form method="get" class="sir-actions">
                 <input type="hidden" name="action" value="check">
@@ -370,7 +374,7 @@ function resultTable(array $rows): string
         <form method="get" class="sir-actions">
             <input type="hidden" name="action" value="check_manual">
             <?php if ($showDebug): ?><input type="hidden" name="debug" value="1"><?php endif; ?>
-            <input class="sir-input sir-inline-input" name="manual_ip" placeholder="Search IPv4">
+            <input class="sir-input sir-inline-input" name="manual_ip" placeholder="Enter IP">
             <button class="sir-btn secondary" type="submit">Search IP</button>
         </form>
         <p class="sir-small sir-help">Manually search an IPv4 address across the aggregated FireHOL-based blocklists.</p>
@@ -387,7 +391,7 @@ function resultTable(array $rows): string
 
     <details class="sir-card sir-disclosure" style="margin-top:16px">
         <summary>Privacy, Security & Source Data</summary>
-        <p class="sir-small sir-muted">This tool only sends the selected IP address(es) to the Sernate blocklist lookup API to check whether they appear in known blocklist feeds. No DirectAdmin login details, usernames, domains, email addresses, server configuration, logs, files, or customer data are sent.</p>
+        <p class="sir-small sir-muted">This tool only sends the selected IP address(es) to the Sernate blocklist lookup API at <a href="https://blocklist.sernate.com" target="_blank" rel="noopener noreferrer">blocklist.sernate.com</a>. API documentation is available at <a href="https://blocklist.sernate.com/docs" target="_blank" rel="noopener noreferrer">blocklist.sernate.com/docs</a>. No DirectAdmin login details, usernames, domains, email addresses, server configuration, logs, files, or customer data are sent.</p>
         <p class="sir-small sir-muted">Like any tool that uses an external API, there is some trust involved if that source is unavailable or returns unexpected data. For that reason, API responses are treated as untrusted text: returned values are escaped or validated before display and are never used to run server commands.</p>
         <p class="sir-small sir-muted">The lookup is read-only. It does not change firewall rules, unblock or block IPs, modify DirectAdmin settings, or contact any listed feed maintainers.</p>
         <p class="sir-small sir-muted"><a href="http://iplists.firehol.org/" target="_blank" rel="noopener noreferrer">FireHOL</a> and the upstream feed maintainers deserve credit for collecting, curating and maintaining the source blocklist data. Sernate provides the hosted API, indexing, history, freshness checks and this DirectAdmin plugin. Removal requests must go to the maintainer of the source list where the IP appears.</p>
@@ -436,7 +440,7 @@ function resultTable(array $rows): string
         <p class="sir-muted">Current page update message: <?= SernateFireholBlocklistCheck::html((string) ($update['message'] ?? '')) ?></p>
     </details>
     <?php endif; ?>
-    <div class="sir-footer">&copy; <?= date('Y') ?> sernate.com - Wesley van Rossum</div>
+    <div class="sir-footer">&copy; <?= date('Y') ?> sernate.com - <a href="https://github.com/WeszNL/directadmin-firehol-ip-blocklist-check" target="_blank" rel="noopener noreferrer">Wesley van Rossum</a></div>
 </div>
 <script>
     (function () {

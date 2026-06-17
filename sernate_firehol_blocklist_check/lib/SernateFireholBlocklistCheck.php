@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 final class SernateFireholBlocklistCheck
 {
-    public const VERSION = '1.0.0';
+    public const VERSION = '1.0.1';
     public const PLUGIN_ID = 'sernate_firehol_blocklist_check';
     public const DEFAULT_API_BASE_URL = 'https://blocklist.sernate.com';
     public const UPDATE_URL = 'https://github.com/WeszNL/directadmin-firehol-ip-blocklist-check/releases/latest/download/sernate_firehol_blocklist_check.tar.gz';
@@ -1009,7 +1009,7 @@ final class SernateFireholBlocklistCheck
     {
         $statusCode = (int) ($response['status_code'] ?? 0);
         if ($statusCode === 429) {
-            return 'Rate limited: the Sernate Blocklist API received too many requests. Please wait and try again later.';
+            return 'Rate limited: the Sernate Blocklist API is busy or received too many requests. Please wait and try again later.';
         }
 
         if ($statusCode === 503) {
