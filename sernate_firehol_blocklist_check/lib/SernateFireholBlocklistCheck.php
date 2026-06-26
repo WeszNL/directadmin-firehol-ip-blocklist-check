@@ -4,12 +4,17 @@ declare(strict_types=1);
 
 final class SernateFireholBlocklistCheck
 {
-    public const VERSION = '1.0.1';
+    public const VERSION = '1.0.2';
     public const PLUGIN_ID = 'sernate_firehol_blocklist_check';
     public const DEFAULT_API_BASE_URL = 'https://blocklist.sernate.com';
     public const UPDATE_URL = 'https://github.com/WeszNL/directadmin-firehol-ip-blocklist-check/releases/latest/download/sernate_firehol_blocklist_check.tar.gz';
     public const VERSION_URL = 'https://raw.githubusercontent.com/WeszNL/directadmin-firehol-ip-blocklist-check/main/version.txt';
     public const UPDATE_CACHE_TTL = 43200;
+    public const MANUAL_CACHE_TTL = 300;
+    public const RATE_LIMIT_BACKOFF_TTL = 300;
+    public const SERVER_RECENT_TTL = 60;
+    public const RESULT_ROW_LIMIT = 100;
+    public const FEED_HIT_DISPLAY_LIMIT = 50;
 
     public static function defaultConfig(): array
     {
@@ -66,6 +71,16 @@ final class SernateFireholBlocklistCheck
     public static function updateCacheFile(): string
     {
         return self::storageDir() . '/update_cache.json';
+    }
+
+    public static function manualCacheFile(): string
+    {
+        return self::storageDir() . '/manual_cache.json';
+    }
+
+    public static function rateLimitFile(): string
+    {
+        return self::storageDir() . '/rate_limit.json';
     }
 
     public static function debugFile(): string
@@ -188,14 +203,61 @@ final class SernateFireholBlocklistCheck
         return in_array($hours, [8, 12, 24], true) ? $hours : 8;
     }
 
-    public static function validManualIpv4(string $ip): ?string
+    public static function validManualSearchInput(string $input): ?string
     {
-        $ip = trim($ip);
-        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-            return $ip;
+        $input = trim($input);
+        if (filter_var($input, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            return $input;
         }
 
-        return null;
+        if (strpos($input, '/') === false) {
+            return null;
+        }
+
+        $parts = explode('/', $input, 2);
+        $ip = trim((string) ($parts[0] ?? ''));
+        $prefix = trim((string) ($parts[1] ?? ''));
+        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) || !preg_match('/^\d{1,2}$/', $prefix)) {
+            return null;
+        }
+
+        $prefixInt = (int) $prefix;
+        if ($prefixInt < 16 || $prefixInt > 32) {
+            return null;
+        }
+
+        $network = self::cidrNetwork($ip, $prefixInt);
+        if ($network === null) {
+            return null;
+        }
+
+        return $network . '/' . $prefixInt;
+    }
+
+    public static function validManualIpv4(string $ip): ?string
+    {
+        $input = self::validManualSearchInput($ip);
+        return $input !== null && strpos($input, '/') === false ? $input : null;
+    }
+
+    public static function isCidrInput(string $input): bool
+    {
+        return strpos($input, '/') !== false;
+    }
+
+    private static function cidrNetwork(string $ip, int $prefix): ?string
+    {
+        $long = ip2long($ip);
+        if ($long === false) {
+            return null;
+        }
+
+        $unsigned = (int) sprintf('%u', $long);
+        $blockSize = 2 ** (32 - $prefix);
+        $network = intdiv($unsigned, (int) $blockSize) * (int) $blockSize;
+        $networkIp = long2ip($network);
+
+        return is_string($networkIp) ? $networkIp : null;
     }
 
     public static function ensureWritableDirs(): void
@@ -290,7 +352,7 @@ final class SernateFireholBlocklistCheck
         ];
     }
 
-    public static function runCheck(?array $ips = null, ?array $config = null, string $scope = 'server'): array
+    public static function runCheck(?array $ips = null, ?array $config = null, string $scope = 'server', bool $force = false): array
     {
         $config = $config ?? self::loadConfig();
         $ips = $ips ?? self::publicIpv4Addresses();
@@ -309,11 +371,46 @@ final class SernateFireholBlocklistCheck
             ], $scope);
         }
 
-        $response = count($ips) === 1
-            ? self::searchSingleIp((string) $config['api_base_url'], $ips[0], $config)
-            : self::searchMultipleIps((string) $config['api_base_url'], $ips, $config);
+        if ($scope === 'server' && !$force) {
+            $recent = self::recentServerResult($ips);
+            if ($recent !== null) {
+                return $recent;
+            }
+        }
+
+        $backoffUntil = self::rateLimitBackoffUntil();
+        if ($backoffUntil > time()) {
+            if ($scope === 'server') {
+                $previous = self::rateLimitedPreviousServerResult('local backoff');
+                if ($previous !== null) {
+                    return $previous;
+                }
+            }
+
+            return self::recordResult([
+                'ok' => false,
+                'status' => 'rate_limited',
+                'message' => 'The Sernate Blocklist API is busy or received too many requests. Please wait and try again later.',
+                'checked_at' => gmdate('c'),
+                'scope' => $scope,
+                'ips' => $ips,
+                'api' => ['backoff_until' => gmdate('c', $backoffUntil)],
+                'debug' => self::runtimeDebug($config, $ips, ['ok' => false, 'status_code' => 429, 'error' => 'local backoff']),
+            ], $scope);
+        }
+
+        $response = self::searchMultipleIps((string) $config['api_base_url'], $ips, $config);
 
         if (!$response['ok']) {
+            if ((int) ($response['status_code'] ?? 0) === 429) {
+                self::saveRateLimitBackoff();
+                if ($scope === 'server') {
+                    $previous = self::rateLimitedPreviousServerResult('HTTP 429');
+                    if ($previous !== null) {
+                        return $previous;
+                    }
+                }
+            }
             $status = self::statusFromHttpResponse($response);
             return self::recordResult([
                 'ok' => false,
@@ -356,6 +453,126 @@ final class SernateFireholBlocklistCheck
         return self::recordResult($result, $scope);
     }
 
+    public static function rateLimitedPreviousServerResult(string $reason): ?array
+    {
+        $previous = self::loadLastResult();
+        if (!$previous) {
+            return null;
+        }
+
+        $previous['ok'] = false;
+        $previous['status'] = 'rate_limited';
+        $previous['message'] = 'The Sernate Blocklist API is busy or received too many requests. Showing the previous server result.';
+        $previous['rate_limited_at'] = gmdate('c');
+        $previous['rate_limit_reason'] = $reason;
+        self::recordDebug('run_check', [
+            'scope' => 'server',
+            'result_status' => 'rate_limited',
+            'result_message' => $previous['message'],
+            'result_ips' => $previous['ips'] ?? [],
+            'runtime' => ['http_status' => 429, 'http_error' => $reason],
+        ]);
+
+        return $previous;
+    }
+
+    public static function runManualSearch(string $input, ?array $config = null): array
+    {
+        $config = $config ?? self::loadConfig();
+        $cached = self::loadManualCache($input, $config);
+        if ($cached !== null) {
+            $cached['from_cache'] = true;
+            return $cached;
+        }
+
+        $backoffUntil = self::rateLimitBackoffUntil();
+        if ($backoffUntil > time()) {
+            return [
+                'ok' => false,
+                'status' => 'rate_limited',
+                'message' => 'The Sernate Blocklist API is busy or received too many requests. Please wait and try again later.',
+                'checked_at' => gmdate('c'),
+                'scope' => 'manual',
+                'manual_input' => $input,
+                'ips' => [$input],
+                'api' => ['backoff_until' => gmdate('c', $backoffUntil)],
+                'debug' => self::runtimeDebug($config, [$input], ['ok' => false, 'status_code' => 429, 'error' => 'local backoff']),
+            ];
+        }
+
+        $response = self::searchSingleIp((string) $config['api_base_url'], $input, $config);
+        if (!$response['ok']) {
+            if ((int) ($response['status_code'] ?? 0) === 429) {
+                self::saveRateLimitBackoff();
+            }
+            $result = [
+                'ok' => false,
+                'status' => self::statusFromHttpResponse($response),
+                'message' => self::apiErrorMessage($response),
+                'checked_at' => gmdate('c'),
+                'scope' => 'manual',
+                'manual_input' => $input,
+                'ips' => [$input],
+                'api' => self::safeHttpResponse($response),
+                'debug' => self::runtimeDebug($config, [$input], $response),
+            ];
+            self::recordDebug('run_check', [
+                'scope' => 'manual',
+                'result_status' => $result['status'],
+                'result_message' => $result['message'],
+                'result_ips' => [$input],
+                'runtime' => $result['debug'],
+            ]);
+            return $result;
+        }
+
+        $json = json_decode((string) $response['body'], true);
+        if (!is_array($json)) {
+            $result = [
+                'ok' => false,
+                'status' => 'api_unavailable',
+                'message' => 'The API returned an invalid response.',
+                'checked_at' => gmdate('c'),
+                'scope' => 'manual',
+                'manual_input' => $input,
+                'ips' => [$input],
+                'api' => self::safeHttpResponse($response),
+                'debug' => self::runtimeDebug($config, [$input], $response),
+            ];
+            self::recordDebug('run_check', [
+                'scope' => 'manual',
+                'result_status' => $result['status'],
+                'result_message' => $result['message'],
+                'result_ips' => [$input],
+                'runtime' => $result['debug'],
+            ]);
+            return $result;
+        }
+
+        $result = [
+            'ok' => true,
+            'status' => self::classifyStatus($json, $config),
+            'message' => self::resultMessage(self::classifyStatus($json, $config), 1),
+            'checked_at' => gmdate('c'),
+            'scope' => 'manual',
+            'manual_input' => $input,
+            'ips' => [$input],
+            'api' => $json,
+            'debug' => self::runtimeDebug($config, [$input], ['ok' => true, 'status_code' => 200, 'error' => '']),
+        ];
+
+        self::saveManualCache($input, $config, $result);
+        self::recordDebug('run_check', [
+            'scope' => 'manual',
+            'result_status' => $result['status'],
+            'result_message' => $result['message'],
+            'result_ips' => [$input],
+            'runtime' => $result['debug'],
+        ]);
+
+        return $result;
+    }
+
     public static function searchSingleIp(string $apiBaseUrl, string $ip, array $config): array
     {
         $query = http_build_query([
@@ -389,6 +606,29 @@ final class SernateFireholBlocklistCheck
         return is_array($decoded) ? $decoded : null;
     }
 
+    public static function recentServerResult(array $ips): ?array
+    {
+        $last = self::loadLastResult();
+        if (!$last || empty($last['checked_at']) || !isset($last['ips']) || !is_array($last['ips'])) {
+            return null;
+        }
+
+        $lastIps = array_map('strval', (array) $last['ips']);
+        sort($lastIps);
+        sort($ips);
+        if ($lastIps !== $ips) {
+            return null;
+        }
+
+        $checkedAt = strtotime((string) $last['checked_at']);
+        if (!$checkedAt || time() - $checkedAt > self::SERVER_RECENT_TTL) {
+            return null;
+        }
+
+        $last['from_cache'] = true;
+        return $last;
+    }
+
     public static function loadIpCache(): array
     {
         if (!is_file(self::ipCacheFile())) {
@@ -397,6 +637,93 @@ final class SernateFireholBlocklistCheck
 
         $decoded = json_decode((string) file_get_contents(self::ipCacheFile()), true);
         return is_array($decoded) ? $decoded : [];
+    }
+
+    public static function loadManualCache(string $input, array $config): ?array
+    {
+        if (!is_file(self::manualCacheFile())) {
+            return null;
+        }
+
+        $decoded = json_decode((string) file_get_contents(self::manualCacheFile()), true);
+        if (!is_array($decoded)) {
+            return null;
+        }
+
+        $key = self::manualCacheKey($input, $config);
+        $entry = $decoded[$key] ?? null;
+        if (!is_array($entry) || empty($entry['cached_at']) || !isset($entry['result']) || !is_array($entry['result'])) {
+            return null;
+        }
+
+        $cachedAt = strtotime((string) $entry['cached_at']);
+        if (!$cachedAt || time() - $cachedAt > self::MANUAL_CACHE_TTL) {
+            return null;
+        }
+
+        return $entry['result'];
+    }
+
+    public static function saveManualCache(string $input, array $config, array $result): void
+    {
+        self::ensureWritableDirs();
+        $cache = [];
+        if (is_file(self::manualCacheFile())) {
+            $decoded = json_decode((string) file_get_contents(self::manualCacheFile()), true);
+            if (is_array($decoded)) {
+                $cache = $decoded;
+            }
+        }
+
+        $now = time();
+        foreach ($cache as $key => $entry) {
+            $cachedAt = is_array($entry) ? strtotime((string) ($entry['cached_at'] ?? '')) : false;
+            if (!$cachedAt || $now - $cachedAt > self::MANUAL_CACHE_TTL) {
+                unset($cache[$key]);
+            }
+        }
+
+        $cache[self::manualCacheKey($input, $config)] = [
+            'cached_at' => gmdate('c'),
+            'result' => $result,
+        ];
+
+        if (count($cache) > 20) {
+            uasort($cache, static function ($a, $b): int {
+                return strcmp((string) ($b['cached_at'] ?? ''), (string) ($a['cached_at'] ?? ''));
+            });
+            $cache = array_slice($cache, 0, 20, true);
+        }
+
+        self::writeJson(self::manualCacheFile(), $cache);
+    }
+
+    private static function manualCacheKey(string $input, array $config): string
+    {
+        return sha1(implode('|', [
+            strtolower($input),
+            !empty($config['current_only']) ? 'current' : 'all',
+            !empty($config['include_stale']) ? 'stale' : 'fresh',
+        ]));
+    }
+
+    public static function rateLimitBackoffUntil(): int
+    {
+        if (!is_file(self::rateLimitFile())) {
+            return 0;
+        }
+
+        $decoded = json_decode((string) file_get_contents(self::rateLimitFile()), true);
+        return is_array($decoded) ? (int) ($decoded['until'] ?? 0) : 0;
+    }
+
+    public static function saveRateLimitBackoff(): void
+    {
+        self::ensureWritableDirs();
+        self::writeJson(self::rateLimitFile(), [
+            'until' => time() + self::RATE_LIMIT_BACKOFF_TTL,
+            'until_human' => gmdate('c', time() + self::RATE_LIMIT_BACKOFF_TTL),
+        ]);
     }
 
     public static function recordDebug(string $action, array $extra = []): void
@@ -537,7 +864,7 @@ final class SernateFireholBlocklistCheck
         }
 
         $previous = self::loadLastResult();
-        $result = self::runCheck(null, $config);
+        $result = self::runCheck(null, $config, 'server', $force);
 
         $shouldNotify = !empty($config['notify_on_new_listings']) && ($force || self::hasNewActiveListing($previous, $result));
         if ($shouldNotify) {
@@ -683,6 +1010,10 @@ final class SernateFireholBlocklistCheck
 
         foreach (($result['ips'] ?? []) as $ip) {
             $ip = (string) $ip;
+            if (self::isCidrInput($ip) && $rows !== []) {
+                continue;
+            }
+
             if (!isset($rows[$ip])) {
                 $rows[$ip] = [
                     'ip' => $ip,
@@ -698,6 +1029,34 @@ final class SernateFireholBlocklistCheck
 
         ksort($rows);
         return array_values($rows);
+    }
+
+    public static function isTruncatedResult(?array $result): bool
+    {
+        return !empty($result['api']['truncated']);
+    }
+
+    public static function matchedResultCount(?array $result): int
+    {
+        return is_array($result) && isset($result['api']['results']) && is_array($result['api']['results'])
+            ? count($result['api']['results'])
+            : 0;
+    }
+
+    public static function listMatchCount(?array $result): int
+    {
+        if (!is_array($result) || empty($result['api']['results']) || !is_array($result['api']['results'])) {
+            return 0;
+        }
+
+        $count = 0;
+        foreach ($result['api']['results'] as $row) {
+            if (is_array($row)) {
+                $count += is_array($row['hits'] ?? null) ? count($row['hits']) : (int) ($row['hits_count'] ?? 0);
+            }
+        }
+
+        return $count;
     }
 
     public static function activeHits(array $row): array
@@ -777,23 +1136,6 @@ final class SernateFireholBlocklistCheck
         }
 
         return 'No current listing in checked FireHOL feeds.';
-    }
-
-    public static function hitDateSummary(array $hit): string
-    {
-        $added = self::humanTime((string) ($hit['last_added'] ?? $hit['first_seen'] ?? ''));
-        $removed = self::humanTime((string) ($hit['last_removed'] ?? ''));
-        $parts = [];
-
-        if ($added !== 'Never') {
-            $parts[] = 'Added ' . $added;
-        }
-
-        if ($removed !== 'Never') {
-            $parts[] = 'Removed ' . $removed;
-        }
-
-        return implode(' / ', $parts);
     }
 
     public static function hitEvidence(array $hit): string
@@ -1009,7 +1351,7 @@ final class SernateFireholBlocklistCheck
     {
         $statusCode = (int) ($response['status_code'] ?? 0);
         if ($statusCode === 429) {
-            return 'Rate limited: the Sernate Blocklist API is busy or received too many requests. Please wait and try again later.';
+            return 'The Sernate Blocklist API is busy or received too many requests. Please wait and try again later.';
         }
 
         if ($statusCode === 503) {

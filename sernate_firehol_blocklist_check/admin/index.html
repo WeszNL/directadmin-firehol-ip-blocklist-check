@@ -24,21 +24,21 @@ if ($action !== '') {
             SernateFireholBlocklistCheck::saveConfig($requestData);
             $notice = 'Settings saved.';
         } elseif ($action === 'check') {
-            $result = SernateFireholBlocklistCheck::runCheck();
+            $result = SernateFireholBlocklistCheck::runCheck(null, null, 'server', true);
             $pageResult = $result;
             $pageResultScope = 'server';
             $notice = (string) $result['message'];
             $noticeStatus = (string) ($result['status'] ?? '');
         } elseif ($action === 'check_manual') {
-            $manualIp = SernateFireholBlocklistCheck::validManualIpv4((string) ($requestData['manual_ip'] ?? ''));
-            if ($manualIp === null) {
-                throw new RuntimeException('Enter a valid IPv4 address.');
+            $manualInput = SernateFireholBlocklistCheck::validManualSearchInput((string) ($requestData['manual_ip'] ?? ''));
+            if ($manualInput === null) {
+                throw new RuntimeException('Enter a valid IPv4 address or CIDR range from /16 to /32.');
             }
 
-            $result = SernateFireholBlocklistCheck::runCheck([$manualIp], null, 'manual');
+            $result = SernateFireholBlocklistCheck::runManualSearch($manualInput);
             $pageResult = $result;
             $pageResultScope = 'manual';
-            $notice = 'Manual check completed for ' . $manualIp . '.';
+            $notice = 'Manual check completed for ' . $manualInput . '.';
             $noticeStatus = (string) ($result['status'] ?? '');
         }
     } catch (Throwable $exception) {
@@ -90,7 +90,7 @@ function resultIntro(?array $result, string $cleanText, string $listedText): str
     }
 
     if ($status === 'rate_limited') {
-        return '<div class="sir-alert sir-result-warning"><strong>Rate limited:</strong> the API is busy or received too many requests. Please wait and try again later.</div>';
+        return '<div class="sir-alert sir-result-warning"><strong>Rate limited:</strong> ' . SernateFireholBlocklistCheck::html((string) ($result['message'] ?? 'The API is busy or received too many requests. Please wait and try again later.')) . '</div>';
     }
 
     if ($status === 'api_unavailable') {
@@ -107,55 +107,93 @@ function feedList(array $row): string
         return '<span class="sir-muted">No current listing in checked FireHOL feeds.</span>';
     }
 
+    $totalHits = count($hits);
+    $hits = array_slice($hits, 0, SernateFireholBlocklistCheck::FEED_HIT_DISPLAY_LIMIT);
     $html = '<details class="sir-feed-details"><summary>' . SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::rowFeedSummary($row)) . '</summary>';
+    $listNumber = 0;
     foreach ($hits as $hit) {
         if (!is_array($hit)) {
             continue;
         }
 
+        $listNumber++;
         $hitStatus = (string) ($hit['current_status'] ?? '');
         $maintainerUrl = SernateFireholBlocklistCheck::safeUrl((string) ($hit['maintainer_url'] ?? ''));
         $sourceUrl = SernateFireholBlocklistCheck::safeUrl((string) ($hit['list_source_url'] ?? ''));
-        $dateSummary = SernateFireholBlocklistCheck::hitDateSummary($hit);
         $evidence = SernateFireholBlocklistCheck::hitEvidence($hit);
+        $updated = SernateFireholBlocklistCheck::humanTime((string) ($hit['source_file_date'] ?? ''));
+        $synced = SernateFireholBlocklistCheck::humanTime((string) ($hit['feed_last_synced_at'] ?? ''));
+        $firstSeen = SernateFireholBlocklistCheck::humanTime((string) ($hit['first_seen'] ?? ''));
+        $lastAdded = SernateFireholBlocklistCheck::humanTime((string) ($hit['last_added'] ?? ''));
+        $removed = SernateFireholBlocklistCheck::humanTime((string) ($hit['last_removed'] ?? ''));
+        $matchedSourceDate = SernateFireholBlocklistCheck::humanTime((string) ($hit['matched_source_file_date'] ?? ''));
+        $feedSyncStatus = trim((string) ($hit['feed_sync_status'] ?? ''));
 
         $html .= '<div class="sir-feed sir-small">';
         $html .= '<div class="sir-feed-head">';
-        $html .= '<span class="sir-feed-name">' . SernateFireholBlocklistCheck::html((string) ($hit['feed_name'] ?? 'Unknown feed')) . '</span>';
+        $html .= '<div class="sir-feed-title"><strong>List ' . $listNumber . ':</strong> <span class="sir-feed-name">' . SernateFireholBlocklistCheck::html((string) ($hit['feed_name'] ?? 'Unknown feed')) . '</span>';
+        if (!empty($hit['maintainer'])) {
+            $html .= ' <span class="sir-muted">(' . SernateFireholBlocklistCheck::html((string) $hit['maintainer']) . ')</span>';
+        }
+        $html .= '</div>';
+        $html .= '<div class="sir-feed-badges">';
         if (!empty($hit['category'])) {
             $html .= '<span class="sir-category">' . SernateFireholBlocklistCheck::html((string) $hit['category']) . '</span>';
         }
         if ($hitStatus === 'present') {
-            $html .= '<span class="sir-pill listed">Currently listed</span>';
+            $html .= '<span class="sir-pill listed">Present</span>';
         } elseif ($hitStatus === 'absent') {
-            $html .= '<span class="sir-pill history">History only</span>';
+            $html .= '<span class="sir-pill history">History only <span class="sir-help-dot" title="This IP or range was seen in this feed before, but is not currently present in the fresh feed result.">?</span></span>';
         }
         if (!empty($hit['source_is_stale'])) {
-            $html .= '<span class="sir-pill history">Stale source</span>';
+            $html .= '<span class="sir-pill history">Stale source <span class="sir-help-dot" title="The upstream source feed appears older than expected. Treat this as investigation context, not active fresh evidence.">?</span></span>';
         }
         $html .= '</div>';
+        $html .= '</div>';
 
-        if (!empty($hit['maintainer'])) {
-            $html .= '<div>Maintainer: <span class="sir-maintainer">' . SernateFireholBlocklistCheck::html((string) $hit['maintainer']) . '</span></div>';
-        }
-        if ($dateSummary !== '') {
-            $html .= '<div class="sir-muted">' . SernateFireholBlocklistCheck::html($dateSummary) . '</div>';
+        if ($updated !== 'Never' || $synced !== 'Never') {
+            $html .= '<div class="sir-feed-freshness">';
+            if ($updated !== 'Never') {
+                $html .= '<span>Updated: ' . SernateFireholBlocklistCheck::html($updated) . '</span>';
+            }
+            if ($synced !== 'Never') {
+                $html .= '<span>Synced: ' . SernateFireholBlocklistCheck::html($synced) . '</span>';
+            }
+            $html .= '</div>';
         }
         if ($evidence !== '') {
-            $html .= '<div class="sir-evidence">Evidence: ' . SernateFireholBlocklistCheck::html($evidence) . '</div>';
+            $html .= '<div class="sir-evidence"><strong>Evidence:</strong> ' . SernateFireholBlocklistCheck::html($evidence) . '</div>';
         }
-        if ($maintainerUrl !== '' || $sourceUrl !== '') {
+        if ($maintainerUrl !== '') {
+            $html .= '<div><strong>Maintainer URL:</strong> <a href="' . SernateFireholBlocklistCheck::html($maintainerUrl) . '" target="_blank" rel="noopener noreferrer">' . SernateFireholBlocklistCheck::html($maintainerUrl) . '</a></div>';
+        } elseif (!empty($hit['maintainer'])) {
+            $html .= '<div><strong>Maintainer:</strong> <span class="sir-maintainer">' . SernateFireholBlocklistCheck::html((string) $hit['maintainer']) . '</span></div>';
+        }
+        if ($firstSeen !== 'Never') {
+            $html .= '<div><strong>First Seen:</strong> ' . SernateFireholBlocklistCheck::html($firstSeen) . '</div>';
+        }
+        if ($lastAdded !== 'Never') {
+            $html .= '<div><strong>Last Added:</strong> ' . SernateFireholBlocklistCheck::html($lastAdded) . '</div>';
+        }
+        if ($removed !== 'Never') {
+            $html .= '<div><strong>Removed:</strong> ' . SernateFireholBlocklistCheck::html($removed) . '</div>';
+        }
+        if ($matchedSourceDate !== 'Never' && $matchedSourceDate !== $updated) {
+            $html .= '<div class="sir-technical"><strong>Technical:</strong> matched entry source date: ' . SernateFireholBlocklistCheck::html($matchedSourceDate) . '</div>';
+        }
+        if ($feedSyncStatus !== '' && strtolower($feedSyncStatus) !== 'ok') {
+            $html .= '<div class="sir-technical"><strong>Feed sync status:</strong> ' . SernateFireholBlocklistCheck::html($feedSyncStatus) . '</div>';
+        }
+        if ($sourceUrl !== '') {
             $html .= '<div class="sir-feed-links">';
-            if ($maintainerUrl !== '') {
-                $html .= '<a class="sir-link-chip" href="' . SernateFireholBlocklistCheck::html($maintainerUrl) . '" target="_blank" rel="noopener noreferrer">Maintainer</a>';
-            }
-            if ($sourceUrl !== '') {
-                $html .= '<a class="sir-link-chip" href="' . SernateFireholBlocklistCheck::html($sourceUrl) . '" target="_blank" rel="noopener noreferrer">Source</a>';
-            }
+            $html .= '<a class="sir-link-chip" href="' . SernateFireholBlocklistCheck::html($sourceUrl) . '" target="_blank" rel="noopener noreferrer">Source</a>';
             $html .= '</div>';
         }
 
         $html .= '</div>';
+    }
+    if ($totalHits > SernateFireholBlocklistCheck::FEED_HIT_DISPLAY_LIMIT) {
+        $html .= '<div class="sir-small sir-muted">Showing first ' . SernateFireholBlocklistCheck::FEED_HIT_DISPLAY_LIMIT . ' list matches for this IP.</div>';
     }
     $html .= '</details>';
 
@@ -168,6 +206,8 @@ function resultTable(array $rows): string
         return '';
     }
 
+    $totalRows = count($rows);
+    $rows = array_slice($rows, 0, SernateFireholBlocklistCheck::RESULT_ROW_LIMIT);
     $html = '<table class="sir-table"><thead><tr><th>IP</th><th>Status</th><th>Last Checked</th><th>Feeds</th></tr></thead><tbody>';
     foreach ($rows as $row) {
         if (!is_array($row)) {
@@ -182,8 +222,20 @@ function resultTable(array $rows): string
         $html .= '</tr>';
     }
     $html .= '</tbody></table>';
+    if ($totalRows > SernateFireholBlocklistCheck::RESULT_ROW_LIMIT) {
+        $html .= '<p class="sir-small sir-muted">Showing first ' . SernateFireholBlocklistCheck::RESULT_ROW_LIMIT . ' matched IPs returned by the API.</p>';
+    }
 
     return $html;
+}
+
+function resultWarnings(?array $result): string
+{
+    if (!$result || !SernateFireholBlocklistCheck::isTruncatedResult($result)) {
+        return '';
+    }
+
+    return '<div class="sir-alert sir-result-warning"><strong>Partial result:</strong> this CIDR range is large and the API returned the first 500 list matches. More matches may exist. Search a smaller subnet for a complete result.</div>';
 }
 
 ?>
@@ -238,13 +290,18 @@ function resultTable(array $rows): string
     .sir-pill.listed { background: #fee2e2; color: #991b1b; }
     .sir-pill.history { background: #fef3c7; color: #92400e; }
     .sir-feed-details summary { cursor: pointer; font-weight: 650; color: #334155; }
-    .sir-feed { padding: 8px 0; border-bottom: 1px dashed #e5eaf2; }
+    .sir-feed { margin: 8px 0; padding: 12px 14px; border: 1px solid #d7dde8; border-radius: 4px; background: #fff; }
     .sir-feed:last-child { border-bottom: 0; }
-    .sir-feed-head { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-bottom: 3px; }
+    .sir-feed-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+    .sir-feed-title { min-width: 0; font-size: 14px; }
+    .sir-feed-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
     .sir-feed-name { font-weight: 700; color: #111827; }
+    .sir-feed-freshness { display: flex; flex-wrap: wrap; gap: 10px; margin: 2px 0 10px; color: #667085; font-size: 12px; }
     .sir-category { display: inline-flex; align-items: center; min-height: 20px; padding: 0 7px; border-radius: 999px; background: #eef2ff; color: #334155; font-size: 12px; font-weight: 700; }
     .sir-maintainer { color: #111827; font-weight: 700; }
-    .sir-evidence { margin-top: 3px; color: #374151; }
+    .sir-evidence { margin: 8px 0; padding: 10px 12px; border-left: 3px solid #168eea; border-radius: 4px; background: #eff6ff; color: #1f3b57; font-size: 14px; }
+    .sir-technical { margin-top: 4px; color: #667085; font-size: 12px; }
+    .sir-help-dot { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; margin-left: 4px; border-radius: 999px; background: rgba(255,255,255,.75); color: inherit; font-size: 11px; line-height: 1; cursor: help; }
     .sir-feed-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
     .sir-link-chip { display: inline-flex; align-items: center; min-height: 22px; padding: 0 8px; border-radius: 4px; background: #eef2ff; color: #1e3a8a; text-decoration: none; font-weight: 700; font-size: 12px; }
     .sir-link-chip:hover { background: #dbeafe; text-decoration: none; }
@@ -318,6 +375,7 @@ function resultTable(array $rows): string
                 <p class="sir-muted">Last checked: <?= SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::humanTime((string) $last['checked_at'])) ?></p>
             <?php endif; ?>
             <?= resultIntro($last, 'no checked server IP is currently listed in fresh FireHOL blocklists.', 'one or more server IP addresses appear in indexed FireHOL blocklists.') ?>
+            <?= resultWarnings($last) ?>
             <?= resultTable($resultRows) ?>
             <form method="get" class="sir-actions">
                 <input type="hidden" name="action" value="check">
@@ -374,17 +432,26 @@ function resultTable(array $rows): string
         <form method="get" class="sir-actions">
             <input type="hidden" name="action" value="check_manual">
             <?php if ($showDebug): ?><input type="hidden" name="debug" value="1"><?php endif; ?>
-            <input class="sir-input sir-inline-input" name="manual_ip" placeholder="Enter IP">
+            <input class="sir-input sir-inline-input" name="manual_ip" placeholder="Enter IP or CIDR">
             <button class="sir-btn secondary" type="submit">Search IP</button>
         </form>
-        <p class="sir-small sir-help">Manually search an IPv4 address across the aggregated FireHOL-based blocklists.</p>
+        <p class="sir-small sir-help">Manually search an IPv4 address or CIDR range (/16 to /32) across the aggregated FireHOL-based blocklists.</p>
     </section>
 
     <?php if ($manualLast): ?>
         <section class="sir-card" style="margin-top:16px">
             <h2>Manual Search Result</h2>
             <p class="sir-muted">Last checked: <?= SernateFireholBlocklistCheck::html(SernateFireholBlocklistCheck::humanTime((string) $manualLast['checked_at'])) ?></p>
-            <?= resultIntro($manualLast, 'this IP was not found in current fresh FireHOL blocklists.', 'this IP appears in one or more indexed FireHOL blocklists.') ?>
+            <?php if (!empty($manualLast['manual_input'])): ?>
+                <p class="sir-small sir-muted">
+                    Search: <span class="sir-ip"><?= SernateFireholBlocklistCheck::html((string) $manualLast['manual_input']) ?></span>
+                    / matched IPs: <?= SernateFireholBlocklistCheck::html((string) SernateFireholBlocklistCheck::matchedResultCount($manualLast)) ?>
+                    / list matches: <?= SernateFireholBlocklistCheck::html((string) SernateFireholBlocklistCheck::listMatchCount($manualLast)) ?>
+                    <?php if (!empty($manualLast['from_cache'])): ?> / cached result<?php endif; ?>
+                </p>
+            <?php endif; ?>
+            <?= resultIntro($manualLast, 'no current listing was found for this search in fresh FireHOL blocklists.', 'this search returned one or more indexed FireHOL blocklist matches.') ?>
+            <?= resultWarnings($manualLast) ?>
             <?= resultTable($manualRows) ?>
         </section>
     <?php endif; ?>
@@ -394,7 +461,7 @@ function resultTable(array $rows): string
         <p class="sir-small sir-muted">This tool only sends the selected IP address(es) to the Sernate blocklist lookup API at <a href="https://blocklist.sernate.com" target="_blank" rel="noopener noreferrer">blocklist.sernate.com</a>. API documentation is available at <a href="https://blocklist.sernate.com/docs" target="_blank" rel="noopener noreferrer">blocklist.sernate.com/docs</a>. No DirectAdmin login details, usernames, domains, email addresses, server configuration, logs, files, or customer data are sent.</p>
         <p class="sir-small sir-muted">Like any tool that uses an external API, there is some trust involved if that source is unavailable or returns unexpected data. For that reason, API responses are treated as untrusted text: returned values are escaped or validated before display and are never used to run server commands.</p>
         <p class="sir-small sir-muted">The lookup is read-only. It does not change firewall rules, unblock or block IPs, modify DirectAdmin settings, or contact any listed feed maintainers.</p>
-        <p class="sir-small sir-muted"><a href="http://iplists.firehol.org/" target="_blank" rel="noopener noreferrer">FireHOL</a> and the upstream feed maintainers deserve credit for collecting, curating and maintaining the source blocklist data. Sernate provides the hosted API, indexing, history, freshness checks and this DirectAdmin plugin. Removal requests must go to the maintainer of the source list where the IP appears.</p>
+        <p class="sir-small sir-muted"><a href="http://iplists.firehol.org/" target="_blank" rel="noopener noreferrer">FireHOL</a> and the upstream feed maintainers deserve credit for collecting, curating and maintaining the source blocklist data. Sernate provides the hosted API, indexing, history, freshness checks and this DirectAdmin plugin. Removal requests must go to the maintainer of the source list where the IP appears - <strong>we cannot do this for you</strong>.</p>
     </details>
 
     <div class="sir-update sir-small">
@@ -440,7 +507,7 @@ function resultTable(array $rows): string
         <p class="sir-muted">Current page update message: <?= SernateFireholBlocklistCheck::html((string) ($update['message'] ?? '')) ?></p>
     </details>
     <?php endif; ?>
-    <div class="sir-footer">&copy; <?= date('Y') ?> sernate.com - <a href="https://github.com/WeszNL/directadmin-firehol-ip-blocklist-check" target="_blank" rel="noopener noreferrer">Wesley van Rossum</a></div>
+    <div class="sir-footer">&copy; 2023 - <?= date('Y') ?> <a href="https://sernate.com/" target="_blank" rel="noopener noreferrer">Wesley van Rossum</a> - <a href="https://github.com/WeszNL/directadmin-firehol-ip-blocklist-check" target="_blank" rel="noopener noreferrer">WeszNL/directadmin-firehol-ip-blocklist-check</a></div>
 </div>
 <script>
     (function () {

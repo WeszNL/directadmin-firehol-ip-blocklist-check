@@ -101,4 +101,4 @@ Like any tool that uses an external API, there is some trust involved if that so
 
 [FireHOL](http://iplists.firehol.org/) and the upstream feed maintainers deserve credit for collecting, curating and maintaining the source blocklist data.
 
-Sernate provides the hosted API, indexing, history, freshness checks and this DirectAdmin plugin. Removal requests must go to the maintainer of the source list where the IP appears.
+Sernate provides the hosted API, indexing, history, freshness checks and this DirectAdmin plugin. Removal requests must go to the maintainer of the source list where the IP appears - **we cannot do this for you**.
