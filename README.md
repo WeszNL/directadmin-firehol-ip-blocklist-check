@@ -1,14 +1,16 @@
 # Sernate FireHOL Blocklist Check
 
-DirectAdmin admin plugin for checking whether a server's public IPv4 addresses appear in FireHOL-based blocklists indexed by the Sernate Blocklist API.
+DirectAdmin admin plugin for checking whether your server's public IPv4 addresses appear in any indexed IP blocklists.
+
+The plugin uses the Sernate Blocklist API to query an indexed collection of publicly available IP blocklists, currently aggregated by the FireHOL project.
 
 The plugin is meant to answer a simple operational question inside DirectAdmin:
 
-**Are any public IP addresses on this server currently listed in indexed (FireHOL-aggregated) blocklists?**
+> **Are any public IP addresses on this server currently listed in any of the aggregated IP blocklists?**
 
-It can help when checking server IP reputation, looking into abuse reports, reviewing suspicious IPs from access / fireall logs, or troubleshooting possible issues with mail delivery or other blocked outbound connections issues.
+It can help when checking server IP reputation, looking into abuse reports, reviewing suspicious IPs from access or firewall logs, or troubleshooting possible issues with mail delivery or other blocked outbound connections.
 
-The manual search can be useful when you see an IP repeatedly attacking or probing a server. You can look it up to see if it appears in any of the indexed ip blocklist feeds. If only certain feeds list the IP, that may help decide which source lists are worth monitoring or adding to firewall tools such as ConfigServer Firewall (CSF./LFD)
+The manual search can be useful when you see an IP repeatedly attacking or probing a server. You can look it up to see which blocklists include the IP. If only certain sources list the IP, that may help decide which blocklists are worth monitoring or adding to firewall tools such as ConfigServer Firewall (CSF/LFD).
 
 ## Why Use This DirectAdmin Plugin Beside CSF RBL Checks?
 
