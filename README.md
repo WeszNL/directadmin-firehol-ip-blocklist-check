@@ -4,19 +4,19 @@ DirectAdmin admin plugin for checking whether a server's public IPv4 addresses a
 
 The plugin is meant to answer a simple operational question inside DirectAdmin:
 
-**Are any public IP addresses on this server currently listed in indexed FireHOL-based blocklists?**
+**Are any public IP addresses on this server currently listed in indexed (FireHOL-aggregated) blocklists?**
 
-It can help when checking server IP reputation, looking into abuse reports, reviewing suspicious IPs from access logs, or troubleshooting possible issues with mail delivery or blocked outbound connections.
+It can help when checking server IP reputation, looking into abuse reports, reviewing suspicious IPs from access / fireall logs, or troubleshooting possible issues with mail delivery or other blocked outbound connections issues.
 
-The manual search is useful when you see an IP repeatedly attacking or probing a server. You can look it up to see if it appears in any indexed FireHOL-based feeds. If only certain feeds list the IP, that may help decide which source lists are worth monitoring or adding to firewall tools such as ConfigServer Firewall.
+The manual search can be useful when you see an IP repeatedly attacking or probing a server. You can look it up to see if it appears in any of the indexed ip blocklist feeds. If only certain feeds list the IP, that may help decide which source lists are worth monitoring or adding to firewall tools such as ConfigServer Firewall (CSF./LFD)
 
 ## Why Use This DirectAdmin Plugin Beside CSF RBL Checks?
 
-CSF's RBL check is mainly useful for mail blacklist checks and email delivery issues.
+CSF's / LFD RBL check is mainly useful for mail blacklist checks and email delivery issues.
 
 This DirectAdmin plugin checks FireHOL-based IP blocklists, which cover broader security signals such as scanners, abuse, malware, botnets and attack sources.
 
-It does not replace CSF and does not change firewall rules. It gives extra visibility.
+It does not replace CSF and does not change firewall rules or block anything. It gives extra visibility.
 
 ## What It Does
 
@@ -31,11 +31,10 @@ It does not replace CSF and does not change firewall rules. It gives extra visib
 ## What It Does Not Do
 
 - It does not block or unblock IP addresses.
-- It does not modify CSF, firewalld, iptables, nftables or other firewall rules.
+- It does not modify CSF, firewalld, iptables, nftables, ufw or other firewall rules.
 - It does not modify DirectAdmin settings.
 - It does not contact feed maintainers or request removals.
-- It does not guarantee email deliverability.
-- It does not directly monitor Gmail, Microsoft or mailbox-provider reputation systems.
+- It does not guarantee (email deliverability) issues.
 
 The plugin is read-only. It provides visibility and investigation context.
 
@@ -50,7 +49,7 @@ As a result:
 - Not all blocklists carry the same weight or reputation.
 - Different providers and services use different threat intelligence sources.
 - A listing does not necessarily mean a service will block your IP.
-- A listing only matters operationally when a service, provider or administrator actually uses that specific feed or a related source.
+- A listing only matters operationally when a service, provider or administrator actually uses that specific feed or a related source that might be blocking your server or service.
 - An IP may appear in one feed while remaining fully functional for email, APIs and other services.
 - Some listings may be informational rather than immediately actionable.
 
@@ -67,15 +66,13 @@ When a listing is detected, review the affected feed, maintainer, category and s
 
 ## Download
 
-Download the latest plugin package:
+Direct download:
+
+https://github.com/WeszNL/directadmin-firehol-ip-blocklist-check/releases/latest/download/sernate_firehol_blocklist_check.tar.gz
+
+Latest release page:
 
 https://github.com/WeszNL/directadmin-firehol-ip-blocklist-check/releases/latest
-
-Use this file from the latest release:
-
-```text
-sernate_firehol_blocklist_check.tar.gz
-```
 
 ## Install
 
@@ -83,9 +80,14 @@ Install the downloaded package through the DirectAdmin Plugin Manager:
 
 1. Log in to DirectAdmin as an admin user.
 2. Open **Plugin Manager**.
-3. Upload `sernate_firehol_blocklist_check.tar.gz`.
-4. Install the uploaded plugin.
-5. Open **Sernate FireHOL Blocklist Check** from **Extra Features**.
+3. Choose **URL** and paste the direct download link, or choose **File** and upload `sernate_firehol_blocklist_check.tar.gz`.
+4. **Enter the DirectAdmin admin password. DirectAdmin requires this when installing plugins.**
+5. Install the uploaded plugin.
+6. Open **Sernate FireHOL Blocklist Check** from **Extra Features**.
+
+| Install from URL | Install from file |
+| --- | --- |
+| ![Install plugin from URL](docs/screenshots/install_url.png) | ![Install plugin from file](docs/screenshots/install_file.png) |
 
 The plugin is admin-only. Reseller and user level pages are not used for the actual feature.
 
