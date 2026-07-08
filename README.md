@@ -61,10 +61,9 @@ When a listing is detected, review the affected feed, maintainer, category and s
 
 ## Screenshots
 
-|  |  |
-| --- | --- |
-| **Server IP status**<br>![Server IP status](docs/screenshots/screenshot_1.png) | **Settings**<br>![Settings](docs/screenshots/screenshot_2.png) |
-| **Clean overview**<br>![Clean overview](docs/screenshots/screenshot_3.png) | **Manual search result**<br>![Manual search result](docs/screenshots/screenshot_4.png) |
+|  |  |  |
+| --- | --- | --- |
+| ![Screenshot 1](docs/screenshots/screen1.png) | ![Screenshot 2](docs/screenshots/screen2.png) | ![Screenshot 3](docs/screenshots/screen3.png) |
 
 ## Download
 
