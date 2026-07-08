@@ -82,7 +82,7 @@ Install the downloaded package through the DirectAdmin Plugin Manager:
 1. Log in to DirectAdmin as an admin user.
 2. Open **Plugin Manager**.
 3. Choose **URL** and paste the direct download link, or choose **File** and upload `sernate_firehol_blocklist_check.tar.gz`.
-4. **Enter the DirectAdmin admin password. DirectAdmin requires this when installing plugins.**
+4. <b>Enter the DirectAdmin admin password.</b> DirectAdmin requires this when installing plugins.
 5. Install the uploaded plugin.
 6. Open **Sernate FireHOL Blocklist Check** from **Extra Features**.
 
