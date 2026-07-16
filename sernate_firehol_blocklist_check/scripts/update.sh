@@ -27,6 +27,7 @@ fi
 
 mkdir -p "$PLUGIN_DIR/data" "$PLUGIN_DIR/state"
 chmod 755 "$PLUGIN_DIR/data" "$PLUGIN_DIR/state" || true
+rm -f "$PLUGIN_DIR/state/update_cache.json" || true
 
 if [ -x "$PHP_BIN" ]; then
   PLUGIN_DIR="$PLUGIN_DIR" "$PHP_BIN" -r 'require_once getenv("PLUGIN_DIR") . "/lib/SernateFireholBlocklistCheck.php";' >/dev/null 2>&1 || true
