@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 final class SernateFireholBlocklistCheck
 {
-    public const VERSION = '1.0.2';
+    public const VERSION = '1.0.3';
     public const PLUGIN_ID = 'sernate_firehol_blocklist_check';
     public const DEFAULT_API_BASE_URL = 'https://blocklist.sernate.com';
     public const UPDATE_URL = 'https://github.com/WeszNL/directadmin-firehol-ip-blocklist-check/releases/latest/download/sernate_firehol_blocklist_check.tar.gz';
@@ -20,8 +20,8 @@ final class SernateFireholBlocklistCheck
     {
         return [
             'api_base_url' => self::DEFAULT_API_BASE_URL,
-            'schedule_enabled' => false,
-            'schedule_interval_hours' => 8,
+            'schedule_enabled' => true,
+            'schedule_interval_hours' => 12,
             'notify_on_new_listings' => true,
             'notification_method' => 'directadmin',
             'notification_email' => '',
@@ -146,8 +146,38 @@ final class SernateFireholBlocklistCheck
         return $clean;
     }
 
+    public static function ensureDefaultConfigFile(): void
+    {
+        self::ensureWritableDirs();
+
+        if (is_file(self::configFile())) {
+            $decoded = json_decode((string) file_get_contents(self::configFile()), true);
+            if (!is_array($decoded)) {
+                $decoded = [];
+            }
+
+            $updated = false;
+            $defaults = self::defaultConfig();
+            foreach ($defaults as $key => $defaultValue) {
+                if (!array_key_exists($key, $decoded)) {
+                    $decoded[$key] = $defaultValue;
+                    $updated = true;
+                }
+            }
+
+            if ($updated) {
+                self::writeJson(self::configFile(), $decoded);
+            }
+
+            return;
+        }
+
+        self::writeJson(self::configFile(), self::defaultConfig());
+    }
+
     public static function loadConfig(): array
     {
+        self::ensureDefaultConfigFile();
         $config = self::defaultConfig();
         if (is_file(self::configFile())) {
             $raw = file_get_contents(self::configFile());

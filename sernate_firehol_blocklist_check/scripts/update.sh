@@ -28,6 +28,11 @@ fi
 mkdir -p "$PLUGIN_DIR/data" "$PLUGIN_DIR/state"
 chmod 755 "$PLUGIN_DIR/data" "$PLUGIN_DIR/state" || true
 
+if [ -x "$PHP_BIN" ]; then
+  PLUGIN_DIR="$PLUGIN_DIR" "$PHP_BIN" -r 'require_once getenv("PLUGIN_DIR") . "/lib/SernateFireholBlocklistCheck.php";' >/dev/null 2>&1 || true
+  PLUGIN_DIR="$PLUGIN_DIR" "$PHP_BIN" -r 'require_once getenv("PLUGIN_DIR") . "/lib/SernateFireholBlocklistCheck.php"; SernateFireholBlocklistCheck::ensureDefaultConfigFile();' >/dev/null 2>&1 || true
+fi
+
 if id diradmin >/dev/null 2>&1; then
   chown -R diradmin:diradmin "$PLUGIN_DIR/data" "$PLUGIN_DIR/state" || true
   chmod 750 "$PLUGIN_DIR/data" "$PLUGIN_DIR/state" || true

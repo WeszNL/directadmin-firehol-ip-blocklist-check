@@ -1,24 +1,22 @@
 # Sernate FireHOL Blocklist Check
 
-DirectAdmin admin plugin for checking whether your server's public IPv4 addresses appear in any indexed IP blocklists.
-
-The plugin uses the Sernate Blocklist API to query an indexed collection of publicly available IP blocklists, currently aggregated by the FireHOL project.
+DirectAdmin admin plugin for checking whether a server's public IPv4 addresses appear in FireHOL-based blocklists indexed by the Sernate Blocklist API.
 
 The plugin is meant to answer a simple operational question inside DirectAdmin:
 
-> **Are any public IP addresses on this server currently listed in any of the aggregated IP blocklists?**
+**Are any public IP addresses on this server currently listed in indexed FireHOL-based blocklists?**
 
-It can help when checking server IP reputation, looking into abuse reports, reviewing suspicious IPs from access or firewall logs, or troubleshooting possible issues with mail delivery or other blocked outbound connections.
+It can help when checking server IP reputation, looking into abuse reports, reviewing suspicious IPs from access logs, or troubleshooting possible issues with mail delivery or blocked outbound connections.
 
-The manual search can be useful when you see an IP repeatedly attacking or probing a server. You can look it up to see which blocklists include the IP. If only certain sources list the IP, that may help decide which blocklists are worth monitoring or adding to firewall tools such as ConfigServer Firewall (CSF/LFD).
+The manual search is useful when you see an IP repeatedly attacking or probing a server. You can look it up to see if it appears in any indexed FireHOL-based feeds. If only certain feeds list the IP, that may help decide which source lists are worth monitoring or adding to firewall tools such as ConfigServer Firewall.
 
 ## Why Use This DirectAdmin Plugin Beside CSF RBL Checks?
 
-CSF's / LFD RBL check is mainly useful for mail blacklist checks and email delivery issues.
+CSF's RBL check is mainly useful for mail blacklist checks and email delivery issues.
 
 This DirectAdmin plugin checks FireHOL-based IP blocklists, which cover broader security signals such as scanners, abuse, malware, botnets and attack sources.
 
-It does not replace CSF and does not change firewall rules or block anything. It gives extra visibility.
+It does not replace CSF and does not change firewall rules. It gives extra visibility.
 
 ## What It Does
 
@@ -28,15 +26,17 @@ It does not replace CSF and does not change firewall rules or block anything. It
 - Shows affected feeds, feed maintainers, source links, categories and timestamps where available.
 - Includes optional manual IP search.
 - Supports automatic checks every 8, 12 or 24 hours.
+- Automatic checks are enabled by default after install and can be disabled later from the plugin settings.
 - Can notify the DirectAdmin admin or a custom email address when new active listings are found.
 
 ## What It Does Not Do
 
 - It does not block or unblock IP addresses.
-- It does not modify CSF, firewalld, iptables, nftables, ufw or other firewall rules.
+- It does not modify CSF, firewalld, iptables, nftables or other firewall rules.
 - It does not modify DirectAdmin settings.
 - It does not contact feed maintainers or request removals.
-- It does not guarantee (email deliverability) issues.
+- It does not guarantee email deliverability.
+- It does not directly monitor Gmail, Microsoft or mailbox-provider reputation systems.
 
 The plugin is read-only. It provides visibility and investigation context.
 
@@ -51,7 +51,7 @@ As a result:
 - Not all blocklists carry the same weight or reputation.
 - Different providers and services use different threat intelligence sources.
 - A listing does not necessarily mean a service will block your IP.
-- A listing only matters operationally when a service, provider or administrator actually uses that specific feed or a related source that might be blocking your server or service.
+- A listing only matters operationally when a service, provider or administrator actually uses that specific feed or a related source.
 - An IP may appear in one feed while remaining fully functional for email, APIs and other services.
 - Some listings may be informational rather than immediately actionable.
 
@@ -85,6 +85,7 @@ Install the downloaded package through the DirectAdmin Plugin Manager:
 4. <b>Enter the DirectAdmin admin password.</b> DirectAdmin requires this when installing plugins.
 5. Install the uploaded plugin.
 6. Open **Sernate FireHOL Blocklist Check** from **Extra Features**.
+7. The plugin will enable automatic checks by default; you can change the schedule or disable it later from the plugin settings.
 
 | Install from URL | Install from file |
 | --- | --- |
