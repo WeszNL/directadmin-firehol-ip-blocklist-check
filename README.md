@@ -93,6 +93,32 @@ Install the downloaded package through the DirectAdmin Plugin Manager:
 
 The plugin is admin-only. Reseller and user level pages are not used for the actual feature.
 
+## Error During Update From Plugin Manager
+
+On some older servers an install may fail to update with an empty or broken `plugin.tar.gz`, showing an error like:
+
+```text
+Error unpacking /usr/local/directadmin/plugins/sernate_firehol_blocklist_check/plugin.tar.gz : Error restoring file /usr/local/directadmin/plugins/sernate_firehol_blocklist_check/plugin.tar.gz :
+gzip: stdin: unexpected end of file
+/bin/tar: Child returned status 1
+/bin/tar: Error is not recoverable: exiting now
+ : tar returned error code 2
+```
+
+To fix this, edit:
+
+```text
+/usr/local/directadmin/plugins/sernate_firehol_blocklist_check/plugin.conf
+```
+
+Change the `update_url` line to:
+
+```text
+update_url=https://raw.githubusercontent.com/WeszNL/directadmin-firehol-ip-blocklist-check/main/dist/sernate_firehol_blocklist_check.tar.gz
+```
+
+Then run the update again from the DirectAdmin Plugin Manager.
+
 ## Privacy & Security
 
 The plugin sends only the selected IPv4 address(es) to the Sernate blocklist lookup API at https://blocklist.sernate.com. API documentation is available at https://blocklist.sernate.com/docs.
