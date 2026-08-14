@@ -69,7 +69,7 @@ When a listing is detected, review the affected feed, maintainer, category and s
 
 Direct download:
 
-https://github.com/WeszNL/directadmin-firehol-ip-blocklist-check/releases/latest/download/sernate_firehol_blocklist_check.tar.gz
+https://raw.githubusercontent.com/WeszNL/directadmin-firehol-ip-blocklist-check/main/dist/sernate_firehol_blocklist_check.tar.gz
 
 Latest release page:
 

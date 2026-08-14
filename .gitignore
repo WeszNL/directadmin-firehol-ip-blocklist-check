@@ -1,4 +1,7 @@
-dist/
+dist/*
+!dist/sernate_firehol_blocklist_check.tar.gz
+!dist/sernate_firehol_blocklist_check.tar.gz.sha256
+!dist/version.txt
 .local-notes/
 .DS_Store
 sernate_firehol_blocklist_check/data/*.json
